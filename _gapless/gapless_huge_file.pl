@@ -457,6 +457,10 @@ sub prepareSamFiles
 		my $read1_sam = lineToSam ($read1_line);
 		my $read2_sam = lineToSam ($read2_line);
 		
+		#remove suffix if any
+		$read1_sam->{"QNAME"} =~s/\/\d$//;
+		$read2_sam->{"QNAME"} =~s/\/\d$//;
+
 		Carp::croak "read1 and read2 does not have the same name:\n read1=$read1_line\nread2=$read2_line\n" 
 		if $read1_sam->{"QNAME"} ne $read2_sam->{"QNAME"};
 

@@ -131,12 +131,15 @@ if ($big)
 	{
 		$n+= $contigHash->{$chrom}->{'n'};
 	}
+
+	Carp::croak "empty file: $geneContigBedFile\n" unless $n > 0;
 	print "$n genes loaded\n" if $verbose;
 }
 else
 {
 	my $contigs = readBedFile ($geneContigBedFile, $verbose);
 	my $n = @$contigs;
+	Carp::croak "empty file: $geneContigBedFile\n" unless $n > 0;
 	print "$n genes loaded\n" if $verbose;
 
 	my $i = 0;

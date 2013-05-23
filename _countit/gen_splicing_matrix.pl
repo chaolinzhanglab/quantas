@@ -33,6 +33,7 @@ if (@ARGV != 2)
 {
 	print "generate AS matrix\n";
 	print "Usage $prog [options] <in.conf> <out.txt>\n";
+	print " <in.conf> [string]: the first column is the dir or file name, and the second column is the group name\n";
 	print " -base         [string] : base dir of input data\n";
 	print " -type         [string] : AS type ($type)\n";
 	print " --min-cov     [int]    : min coverage ($minCoverage)\n";
@@ -94,8 +95,12 @@ foreach my $gName (@groupNames)
 	foreach my $s (@$samples)
 	{
 		print "$iter: group=$gName, sample=$s\n" if $verbose;
-		my $inputFile = "$s/$type.count.txt";
-		$inputFile = "$base/$inputFile" if $base ne '';
+		my $inputFile = $base ne '' ? "$base/$s" : $s;
+        if (-d $inputFile)
+        {
+            $inputFile = "$inputFile/$type.count.txt";
+        }
+
 		my $sdata = readASDataFile ($inputFile, $type);
 		$ASInfo = $sdata->{"ASInfo"};
 		if ($nAS != 0)
@@ -191,6 +196,11 @@ for (my $i = 0; $i < $nAS; $i++)
         	my $nAltExon = $cols[2];
 			$ex = $d->[4] * ($nAltExon+1);
 		}
+		elsif ($type eq 'apa')
+		{
+			$in = $d->[0]; #site 1
+			$ex = $d->[1]; #site 2
+		}
 		else
 		{
 			Carp::croak "incorrect AS type: $type\n";
@@ -251,8 +261,11 @@ sub readConfigFile
 		$groups{$groupName}->{"id"} = $i++ unless exists $groups{$groupName};
 		push @{$groups{$groupName}->{"samples"}}, $sampleName;
 
-		my $inputFile = "$sampleName/$type.count.txt";
-		$inputFile = "$base/$inputFile" if $base ne '';
+		my $inputFile = $base ne '' ? "$base/$sampleName" : $sampleName;
+		if (-d $inputFile)
+		{
+			$inputFile = "$inputFile/$type.count.txt";
+		}
 
 		Carp::croak "Input file $inputFile does not exist\n" unless -f $inputFile;
 	}
@@ -288,6 +301,13 @@ sub readASDataFile
             push @infoCols, $cols[10];
             @dataCols = @cols[8..9];
             push @dataCols, @cols[11..$#cols];
+        }
+		elsif ($type eq 'apa')
+        {
+            #polyA seq data
+            @infoCols = @cols[0..7];
+            push @infoCols, @cols[10..$#cols];
+            @dataCols = @cols[8..9];
         }
         else
         {

@@ -70,7 +70,7 @@ my $fout;
 print "output results ...\n" if $verbose;
 open ($fout, ">$outFile") || Carp::croak "cannot open $outFile to write\n";
 $iter = 0;
-print $fout join ("\t", "#chrom", "chromStart", "chromEnd", "name", "score", "strand", "geneId", "site1 pos", "site2 pos", "site1 count", "site2 count"), "\n";
+print $fout join ("\t", "#chrom", "chromStart", "chromEnd", "name", "score", "strand", "type", "isoform", "isoform2Count", "isoform1Count", "geneId", "site1Pos", "site2Pos"), "\n";
 foreach my $geneId (sort keys %polyAToGeneHash)
 {
 	print "$iter ...\n" if $verbose && $iter % 1000 == 0;
@@ -99,8 +99,9 @@ foreach my $geneId (sort keys %polyAToGeneHash)
 
 			my $name = join ("//", $p->{'name'}, $q->{'name'});
 
-			print $fout join ("\t", $p->{'chrom'}, $chromStart, $chromEnd + 1, $name, $p->{'score'} + $q->{'score'}, $p->{'strand'}, 
-				$geneId, $p->{'chromStart'}, $q->{'chromStart'}, $p->{'score'}, $q->{'score'}), "\n";
+			print $fout join ("\t", $p->{'chrom'}, $chromStart, $chromEnd + 1, $name, $p->{'score'} + $q->{'score'}, $p->{'strand'},
+				"apa", "P5/P3", $p->{'score'}, $q->{'score'}, $geneId, $p->{'chromStart'}, $q->{'chromStart'}), "\n";
+				#$geneId, $p->{'chromStart'}, $q->{'chromStart'}, $p->{'score'}, $q->{'score'}), "\n";
 		}
 	}
 }

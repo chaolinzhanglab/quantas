@@ -4,6 +4,8 @@ use strict;
 use Getopt::Long;
 use File::Basename;
 
+use Math::CDF qw(:all);
+
 use Carp;
 use Data::Dumper;
 
@@ -17,6 +19,7 @@ my $type = 'cass';
 my $base = "";
 
 my $minCoverage = 20;
+my $test = "fisher"; #or 'chisq', 'g'
 my $FDR = 1;
 my $deltaI = 0;
 my $filterOutput = 0;
@@ -27,6 +30,7 @@ my $cache = getDefaultCache ($prog);
 
 GetOptions ("t|type:s"=>\$type,
 	"base:s"=>\$base,
+	"test:s"=>\$test,
 	"min-cov:i"=>\$minCoverage,
 	"FDR:f"=>\$FDR,
 	"dI:f"=>\$deltaI,
@@ -41,8 +45,10 @@ if (@ARGV != 2)
 {
 	print "statistical test of differential splicing\n";
 	print "Usage $prog [options] <in.conf> <out.txt>\n";
+	print " <in.conf> [string]: the first column is the dir or file name, and the second column is the group name\n";
 	print " -base            [string] : base dir of input data\n";
-	print " -type            [string] : AS type ($type)\n";
+	print " -type            [string] : AS type ([cass]|taca|alt5|alt3|mutx|iret|apa)\n";
+	print " -test            [string] : statistical test method ([fisher]|chisq|g)\n";
 	print " --min-cov        [int]    : min coverage to calculate FDR ($minCoverage)\n";
 	print " --id2gene2symbol [file]   : mapping file of id to gene to symbol\n";
 	print " --filter-output           : filter output by FDR and dI\n";
@@ -108,11 +114,17 @@ my @groupNames = sort {$groups->{$a}->{"id"} <=> $groups->{$b}->{"id"}} keys %$g
 foreach my $gName (@groupNames)
 {
 	my $samples = $groups->{$gName}->{"samples"};
+	Carp::croak "must have replicates for test=$test\n" if $test ne 'fisher' && @$samples < 2;
+
 	foreach my $s (@$samples)
 	{
 		print "$iter: group=$gName, sample=$s\n" if $verbose;
-		my $inputFile = "$s/$type.count.txt";
-		$inputFile = "$base/$inputFile" if $base ne '';
+		my $inputFile = $base ne '' ? "$base/$s" : $s;
+        if (-d $inputFile)
+        {
+            $inputFile = "$inputFile/$type.count.txt";
+        }
+
 		my $sdata = readASDataFile ($inputFile, $type);
 		$ASInfo = $sdata->{"ASInfo"};
 		if ($nAS != 0)
@@ -128,14 +140,14 @@ foreach my $gName (@groupNames)
 	}
 }
 
-print "$iter samples, $nAS events loaded.\n" if $verbose;
+
+my $sampleNum = $iter;
+print "$sampleNum samples, $nAS events loaded.\n" if $verbose;
 
 
 print "aggregating samples in the same group ...\n" if $verbose;
 
-
 my @groupData;
-
 for (my $g = 0; $g < @groupNames; $g++)
 {
 	my $gName = $groupNames[$g];
@@ -157,9 +169,29 @@ for (my $g = 0; $g < @groupNames; $g++)
 	}
 }
 
+
 print "performing statistical analysis ...\n" if $verbose;
 
-my $pvalues = fisherTest (\@groupData, $cache, $verbose);
+my $pvalues;
+
+if ($test eq 'fisher')
+{
+	$pvalues = fisherTest (\@groupData, $cache, $verbose);
+}
+elsif ($test eq 'chisq')
+{
+	$pvalues = chisqTest (\%sampleData, $groups, $verbose);
+}
+elsif ($test eq 'g')
+{
+	$pvalues = GTest (\%sampleData, $groups, $verbose);
+}
+else
+{
+	Carp::croak "incorrect test method: $test\n";
+}
+
+
 
 my @statResult;
 
@@ -258,6 +290,23 @@ for (my $i = 0; $i < $nAS; $i++)
 		$phi1 = $n1 > 0 ? $inc1/$n1 : 'NA';
 		$phi2 = $n2 > 0 ? $inc2/$n2 : 'NA';
 	}
+	elsif ($type eq 'apa')
+	{
+		#0              1          
+		#isoform1Tags	isoform2Tags
+		
+		$inc1 = $groupData[0][$i][0];
+		$ex1 = $groupData[0][$i][1];
+	
+		$inc2 = $groupData[1][$i][0];
+		$ex2 = $groupData[1][$i][1];
+
+		$n1 = $inc1 + $ex1;
+		$n2 = $inc2 + $ex2;
+
+		$phi1 = $n1 > 0 ? $inc1/$n1 : 'NA';
+		$phi2 = $n2 > 0 ? $inc2/$n2 : 'NA';
+	}
 	else
 	{
 		Carp::croak "incorrect AS type: $type\n";
@@ -295,15 +344,26 @@ open ($fout, ">$outFile") || Carp::croak "cannot open file $outFile to write\n";
 
 my @header;
 
+#header for AS info columns
 push @header, "gene" if -f $id2gene2symbolFile;
 push @header, qw(chrom chromStart chromEnd name score strand type isoformIDs);
-push @header, "altSSDistance" if $type eq 'alt5' || $type eq 'alt3';
 
+if ($type eq 'alt5' || $type eq 'alt3')
+{
+	push @header, "altSSDistance" if $type eq 'alt5' || $type eq 'alt3';
+}
+elsif ($type eq 'apa')
+{
+	push @header, qw(geneId site1Pos site2Pos);
+}
+
+#header for statistics columns
 push @header, "coverage";
 push @header, "I_g1($groupNames[0])";
 push @header, "I_g2($groupNames[1])";
 push @header, qw(dI_g1_vs_g2 pvalue FDR);
 
+#header for additional data columns
 if ($type eq 'cass')
 {
 	push @header, qw(isoform1Tags_g1 isoform2Tags_g1 exonTags_g1 inclusionJunction1Tags_g1 inclusionJunction2Tags_g1 skippingJunctionTags_g1);
@@ -328,6 +388,11 @@ elsif ($type eq 'taca')
 {
 	push @header, qw(isoform1Tags_g1 isoform2Tags_g1 exonTags_g1 inclusionJuncctionTags_g1 skippingJunctionTags_g1);
 	push @header, qw(isoform1Tags_g2 isoform2Tags_g2 exonTags_g2 inclusionJuncctionTags_g2 skippingJunctionTags_g2);
+}
+elsif ($type eq 'apa')
+{
+	push @header, qw(isoform1Tags_g1 isoform2Tags_g1);
+	push @header, qw(isoform1Tags_g2 isoform2Tags_g2);
 }
 else
 {
@@ -379,9 +444,11 @@ sub readConfigFile
 		$groups{$groupName}->{"id"} = $i++ unless exists $groups{$groupName};
 		push @{$groups{$groupName}->{"samples"}}, $sampleName;
 
-		my $inputFile = "$sampleName/$type.count.txt";
-		$inputFile = "$base/$inputFile" if $base ne '';
-
+		my $inputFile = $base ne '' ? "$base/$sampleName" : $sampleName;
+        if (-d $inputFile)
+        {
+            $inputFile = "$inputFile/$type.count.txt";
+        }
 		Carp::croak "Input file $inputFile does not exist\n" unless -f $inputFile;
 	}
 	close ($fin);
@@ -417,6 +484,13 @@ sub readASDataFile
 			@dataCols = @cols[8..9];
 			push @dataCols, @cols[11..$#cols];
 		}
+		elsif ($type eq 'apa')
+        {
+            #polyA seq data
+            @infoCols = @cols[0..7];
+			push @infoCols, @cols[10..$#cols];
+            @dataCols = @cols[8..9];
+        }
 		else
 		{
 			Carp::croak "incorrect AS type: $type\n";
@@ -429,6 +503,194 @@ sub readASDataFile
 
 	return {ASInfo=>\@ASInfo, data=>\@data};
 }
+
+
+
+sub chisqTest
+{
+	my ($sampleData, $groups, $verbose) = @_;
+
+	my @groupNames = sort {$groups->{$a}->{"id"} <=> $groups->{$b}->{"id"}} keys %$groups;
+	my %sampleData = %$sampleData;
+
+	my $nAS = @{$sampleData{$groups->{$groupNames[0]}->{"samples"}->[0]}};
+
+	#Carp::croak "nAS=$nAS\n";
+
+	my @pvalues;
+	for (my $i = 0; $i < $nAS; $i++)
+	{
+	
+		print "$i ...\n" if $verbose && $i % 1000 == 0;
+
+		#my @groupIsoform1Sum;
+		#my @groupIsoform2Sum;
+		my @isoform1;
+		my @isoform2;
+
+		#H1: there is differential splicing
+		my $chisqH1 = 0;
+		#print "i=$i\n" if $i == 1317;
+
+		for (my $g = 0; $g < @groupNames; $g++)
+		{
+			my $gName = $groupNames[$g];
+		
+			my $samples = $groups->{$gName}->{"samples"};
+			my @i1 = map {$sampleData{$_}->[$i][0]} @$samples;
+			my @i2 = map {$sampleData{$_}->[$i][1]} @$samples;
+		
+			#$groupIsoform1Sum[$g] = sum (\@i1);
+			#$groupIsoform2Sum[$g] = sum (\@i2);
+	
+			$chisqH1 += chisq ([\@i1, \@i2]);
+
+			#print "chisqH1 = $chisqH1\n";		
+	
+			push @isoform1, @i1;
+			push @isoform2, @i2;
+		}
+
+=debug
+		print "chisqH1 = $chisqH1\n";
+
+		if ($i == 1317)
+		{
+			print "isoform1=", join ("\t", @isoform1), "\n";
+			print "isoform2=", join ("\t", @isoform2), "\n";
+		}
+=cut
+
+		#H0: no differential splicing
+		my $chisqH0 = chisq ([\@isoform1, \@isoform2]);
+
+		#print "chisqH0 = $chisqH0\n";	
+
+=obsolete
+		my $p = 1;
+		if ($chisqH1 > 1e-6)
+	    {
+	        #my $f = $chisqH0 / ($sampleNum -1) / ($chisqH1 / ($sampleNum -2));
+	        my $f = ($chisqH0 -$chisqH1) / ($chisqH1 / ($sampleNum -2));
+	        $f = 0 if $f < 0;
+	        print "f=$f\n";
+
+	        $p = 1 - pf ($f, 1, $sampleNum -2);
+	        $p = 0 if $p < 0;
+	        print "p=$p\n";
+	    }
+=cut
+		#chisq difference test
+		#http://www.psychologie.uzh.ch/fachrichtungen/methoden/team/christinawerner/sem/chisquare_diff_en.pdf
+		my $chisq = $chisqH0 - $chisqH1;
+		$chisq = 0 if $chisq < 0;
+		
+		my $p = 1- pchisq ($chisq, 1);
+		$p = 0 if $p < 0;
+		#print "p=$p\n";
+
+		$pvalues[$i] = $p;
+		#Carp::croak "i=1317\n" if $i == 1317;
+	}
+
+	return \@pvalues;
+}
+
+
+
+sub GTest
+{
+	my ($sampleData, $groups, $verbose) = @_;
+
+	my @groupNames = sort {$groups->{$a}->{"id"} <=> $groups->{$b}->{"id"}} keys %$groups;
+	my %sampleData = %$sampleData;
+
+	my $nAS = @{$sampleData{$groups->{$groupNames[0]}->{"samples"}->[0]}};
+
+	#Carp::croak "nAS=$nAS\n";
+
+	my @pvalues;
+	for (my $i = 0; $i < $nAS; $i++)
+	{
+	
+		print "$i ...\n" if $verbose && $i % 1000 == 0;
+
+		#my @groupIsoform1Sum;
+		#my @groupIsoform2Sum;
+		my @isoform1;
+		my @isoform2;
+
+		#H1: there is differential splicing
+		my $chisqH1 = 0;
+		#print "i=$i\n" if $i == 1317;
+
+		for (my $g = 0; $g < @groupNames; $g++)
+		{
+			my $gName = $groupNames[$g];
+		
+			my $samples = $groups->{$gName}->{"samples"};
+			my @i1 = map {$sampleData{$_}->[$i][0]} @$samples;
+			my @i2 = map {$sampleData{$_}->[$i][1]} @$samples;
+		
+			#$groupIsoform1Sum[$g] = sum (\@i1);
+			#$groupIsoform2Sum[$g] = sum (\@i2);
+	
+			$chisqH1 += gscore ([\@i1, \@i2]);
+
+			#print "chisqH1 = $chisqH1\n";		
+	
+			push @isoform1, @i1;
+			push @isoform2, @i2;
+		}
+
+=debug
+		print "chisqH1 = $chisqH1\n";
+
+		if ($i == 1317)
+		{
+			print "isoform1=", join ("\t", @isoform1), "\n";
+			print "isoform2=", join ("\t", @isoform2), "\n";
+		}
+=cut
+
+		#H0: no differential splicing
+		my $chisqH0 = gscore ([\@isoform1, \@isoform2]);
+
+		#print "chisqH0 = $chisqH0\n";	
+
+=obsolete
+		my $p = 1;
+		if ($chisqH1 > 1e-6)
+	    {
+	        #my $f = $chisqH0 / ($sampleNum -1) / ($chisqH1 / ($sampleNum -2));
+	        my $f = ($chisqH0 -$chisqH1) / ($chisqH1 / ($sampleNum -2));
+	        $f = 0 if $f < 0;
+	        print "f=$f\n";
+
+	        $p = 1 - pf ($f, 1, $sampleNum -2);
+	        $p = 0 if $p < 0;
+	        print "p=$p\n";
+	    }
+=cut
+		#chisq difference test
+		#http://www.psychologie.uzh.ch/fachrichtungen/methoden/team/christinawerner/sem/chisquare_diff_en.pdf
+		my $chisq = $chisqH0 - $chisqH1;
+		$chisq = 0 if $chisq < 0;
+		
+		my $p = 1- pchisq ($chisq, 1);
+		$p = 0 if $p < 0;
+		#print "p=$p\n";
+
+		$pvalues[$i] = $p;
+		#Carp::croak "i=1317\n" if $i == 1317;
+	}
+
+	return \@pvalues;
+}
+
+
+
+
 
 
 sub fisherTest
@@ -472,7 +734,7 @@ for (i in 1:n)
         cat (sprintf("%d\\n",i));
     }
 
-    dat <- matrix(data=as.numeric(data[i,]), nrow=2)
+    dat <- matrix(data=as.integer(data[i,]+0.5), nrow=2)
     out <- fisher.test(dat);
     p[i] <- out\$p.value;
 }

@@ -39,7 +39,7 @@ if (@ARGV != 3)
 	print "summarize the number of reads for each isoform\n";
 	print "Usage: $prog [options] <as.bed> <tag.bed> <summary.txt>\n";
 	print " <as.bed> -- bed file of AS events\n";
-	print " <tag.bed> -- bed file of all tags\n";
+	print " <tag.bed> -- bed file of all tags, gz file allowed\n";
 	print "OPTIONS:\n";
 	print " -big           : the tag file is big\n";
 	print " -type [string] : AS type ([cass]|taca|alt5|alt3|mutx|iret|alts|altt)\n";
@@ -60,6 +60,8 @@ my $tagJunctionBedFile = "$cache/tag.junction.bed";
 if ($asType ne 'altt' && $asType ne 'alts') #alt start or alt termination
 {
 	my $cmd = "grep -v \"^track\" $tagBedFile | awk '{if(NF==12 && \$10>1) {print \$0}}' > $tagJunctionBedFile";
+	$cmd = "gunzip -c $tagBedFile | grep -v \"^track\" | awk '{if(NF==12 && \$10>1) {print \$0}}' > $tagJunctionBedFile" if $tagBedFile =~/\.gz$/;
+
 	my $ret = system ($cmd);
 	print "CMD $cmd failed: $?\n" if $ret != 0;
 }

@@ -8,15 +8,19 @@ use Carp;
 use Bed;
 
 my $prog = basename ($0);
+my $ext = 50;
 
 my $verbose = 0;
-GetOptions ("v"=>\$verbose);
+GetOptions (
+	"ext:i"=>\$ext,
+	"v"=>\$verbose);
 
 if (@ARGV != 3)
 {
 	print "summarize polyA sites\n";
 	print "Usage: $prog [options] <sample.count.bed> <polyA2gene.map> <out.txt>\n";
-	print " -v : verbose\n";
+	print " -ext [int]: extension of the region in output ($ext)\n";
+	print " -v        : verbose\n";
 	exit (1);
 }
 
@@ -80,10 +84,17 @@ foreach my $geneId (sort keys %polyAToGeneHash)
 	next unless @$polyAs > 1;
 
 	my $strand = $polyAs->[0]->{"strand"};
+	my $skip = 0;
 	for (my $i = 1; $i < @$polyAs; $i++)
 	{
-		Carp::croak "different strands found for polyA sites in gene $geneId\n" if $strand ne $polyAs->[$i]->{'strand'};
+		if ($strand ne $polyAs->[$i]->{'strand'})
+		{
+			print "different strands found for polyA sites in gene $geneId\n";
+			$skip = 1;	
+		}
 	}
+
+	next if $skip == 1;
 
 	my @sortedPolyAs = $strand eq '+' ? (sort {$a->{"chromStart"} <=> $b->{'chromStart'}} @$polyAs) : (sort {$b->{"chromStart"} <=> $a->{'chromStart'}} @$polyAs);
 
@@ -94,8 +105,10 @@ foreach my $geneId (sort keys %polyAToGeneHash)
 		{
 			my $q = $sortedPolyAs[$j];
 			my ($chromStart, $chromEnd) = sort {$a <=> $b} ($p->{'chromStart'}, $q->{'chromStart'});
-			$chromStart -= 50;
-			$chromEnd += 50;
+			$chromStart -= $ext;
+			$chromEnd += $ext;
+
+			$p->{'strand'} eq '+' ? $chromStart += 1 : $chromEnd -= 1;
 
 			my $name = join ("//", $p->{'name'}, $q->{'name'});
 

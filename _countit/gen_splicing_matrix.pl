@@ -17,11 +17,13 @@ my $base = "";
 my $minCoverage = 10;
 my $maxStd = 0.1;
 my $naString = "";
+my $average = 0;
 
 my $id2gene2symbolFile = "";
 
 GetOptions ("t|type:s"=>\$type,
 	"base:s"=>\$base,
+	"avg"=>\$average,
 	"min-cov:i"=>\$minCoverage,
 	"max-std:f"=>\$maxStd,
 	"na-string:s"=>\$naString,
@@ -36,6 +38,7 @@ if (@ARGV != 2)
 	print " <in.conf> [string]: the first column is the dir or file name, and the second column is the group name\n";
 	print " -base         [string] : base dir of input data\n";
 	print " -type         [string] : AS type ($type)\n";
+	print " --avg                  : use average instead of sum\n";
 	print " --min-cov     [int]    : min coverage ($minCoverage)\n";
 	print " --max-std     [float]  : max standard deviation ($maxStd)\n";
 	print " --na-string   [string] : na string (default:empty)\n";
@@ -136,10 +139,12 @@ for (my $g = 0; $g < @groupNames; $g++)
 		for (my $i = 0; $i < $nAS; $i++)
 		{
 			my $d = $data->[$i];
-			
+
+			my $nsamples = @$d;
 			for (my $j = 0; $j < @$d; $j++)
             {
                 $groupData[$g][$i][$j] += $d->[$j];
+				$groupData[$g][$i][$j] /= $nsamples if $average;
             }
 		}
 	}

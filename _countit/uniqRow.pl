@@ -17,13 +17,18 @@ my $noExtraCol = 0;
 my $oneBasedIndex = 0; #col ids are 1-based, for compatibility with galaxy
 my $verbose = 0;
 
+my $withHeader = 0;
+my $naString = "NA";
+
 my @ARGV0 = @ARGV;
 
 GetOptions ('c:s'=>\$criteria,
+	'h'=>\$withHeader,
 	'id:i'=> \$groupColIdx,
 	'value:i'=>\$compareColIdx,
 	'one-based-index'=>\$oneBasedIndex,
 	'no-extra-col'=>\$noExtraCol,
+	'na-str:s'=>\$naString,
 	'v'=> \$verbose);
 
 
@@ -31,12 +36,16 @@ if (@ARGV != 2)
 {
 	print STDERR "select uniq rows\n";
 	print STDERR "Usage: $prog [options] <in.txt> <out.txt>\n";
+	print STDERR " <in.txt>         : use \"-\" for stdin\n";
+	print STDERR " <out.txt>        : use \"-\" for stdout\n";
 	print STDERR "OPTIONS:\n";
-	print STDERR " -c     [string]  : criteria to sort ([random]|max_num|max_num_abs|min_num|min_num_abs|max_text|min_text|sum|mean|rowsum|count)\n";
+	print STDERR " -h               : with header line to be included\n";
+	print STDERR " -c     [string]  : criteria to sort ([random]|max_num|max_num_abs|min_num|min_num_abs|max_text|min_text|sum|mean|rowsum|rowmean|count)\n";
 	print STDERR " -id    [int]     : id column (from 0) used to group rows ($groupColIdx)\n";
 	print STDERR " -value [int]     : value column (from 0) used to compare rows ($compareColIdx)\n";
 	print STDERR " --one-based-index: 1-based column index\n";
 	print STDERR " --no-extra-col   : do not print extra columns other than the id and value columns\n";
+	print STDERR " --na-str [string]: NA string ($naString)\n";
 	print STDERR " -v               : verbose\n";
 	exit (0);
 }
@@ -61,6 +70,15 @@ if ($inFile eq '-')
 else
 {
 	open ($fin, "<$inFile") || Carp::croak "can not open file $inFile to read\n";
+}
+
+
+my $header = "";
+
+if ($withHeader)
+{
+	$header = <$fin>;
+	chomp $header;
 }
 
 my $nrow = 0;
@@ -106,6 +124,9 @@ else
 }
 
 print STDERR "dumping unique rows ...\n" if $verbose;
+
+
+print $fout $header, "\n" if $withHeader;
 
 $i = 0;
 foreach my $groupId (sort keys %rowHash)
@@ -207,21 +228,38 @@ foreach my $groupId (sort keys %rowHash)
 		$row->{"row"} = $line;
 
 	}
-	elsif ($criteria eq 'rowsum')
+	elsif ($criteria eq 'rowsum' || $criteria eq 'rowmean')
 	{
 		$row = $rows->[0];
 
-		my @cols = split ("\t", $row->{'row'});
-		for (my $i = 1; $i < @$rows; $i++)
+		my (@cols, @counts); # = split ("\t", $row->{'row'});
+
+		for (my $i = 0; $i < @$rows; $i++)
 		{
 			my @cols2 = split ("\t", $rows->[$i]->{'row'});
+			$cols[$groupColIdx] = $cols2[$groupColIdx];
+
 			for (my $j = 0; $j < @cols2; $j++)
 			{
-				next if $j == $groupColIdx;
+				$counts[$j] += 0;
+				next if $j == $groupColIdx || $cols2[$j] eq $naString;
+
 				$cols[$j]+= $cols2[$j];
+				$counts[$j] += 1;
 			}
 		}
-
+		
+		my $n = @$rows;
+		if ($criteria eq 'rowmean')
+		{
+			for (my $j = 0; $j < @counts; $j++)
+            {
+                next if $j == $groupColIdx;
+				
+                $cols[$j] = $counts[$j] > 0 ? $cols[$j]/$counts[$j] : 'NA';
+            }
+		}
+		
 		$row->{"row"} = join ("\t", @cols);
 	}
 	

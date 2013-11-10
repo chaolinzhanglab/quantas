@@ -235,7 +235,7 @@ if ($profileType eq 'region')
 	
 	$regions = readBedFile ($regionFile);
 	my $n = @$regions;
-	print "$n regions loaded\n";
+	print "$n regions loaded\n" if $verbose;
 
 	foreach my $r (@$regions)
 	{

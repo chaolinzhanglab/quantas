@@ -17,6 +17,7 @@ my $colId = 0;
 my $filterColId = 0;
 my $ignoreCase = 0;
 my $delimitor = "||";
+my $withHeader = 0;
 
 GetOptions ('q|query-column-id:i'=>\$colId,
 		'f:i'=>\$filterColId,
@@ -25,6 +26,7 @@ GetOptions ('q|query-column-id:i'=>\$colId,
 		'pt|print-no-match-text:s'=>\$printNoMatchText,
 		's|print-single-line'=>\$printSingleLine,
 		'd|delimitor:s'=>\$delimitor,
+		'h|with-header'=>\$withHeader,
 		'ss'=>\$printOneMatch
 );
 
@@ -32,7 +34,9 @@ if (@ARGV != 2)
 {
 	print "Select rows from a file\n";
 	print "Usage: $prog [options] <input-file> <filter-file>\n";
+	print " <input-file>: use - for stdin\n";
 	print "OPTIONS:\n";
+	print " -h       : the file has header to be included\n";
 	print " -q [int] : query column id (zero-based) (default=$colId)\n";
 	print " -f [int] : filter column id (zero-based) (default=$filterColId)\n";
 	print " -i       : ignore case (default=off)\n";
@@ -46,10 +50,32 @@ if (@ARGV != 2)
 
 my ($input, $filter) = @ARGV;
 
-open (FD, "<$input") || Carp::croak "can not open file $input to read\n";
+my $fin;
+
+if ($input eq '-')
+{
+    $fin = *STDIN;
+}
+else
+{
+	open ($fin, "<$input") || Carp::croak "can not open file $input to read\n";
+}
+
 my %input;
+
+my $header = "";
+
+if ($withHeader)
+{
+	while ($header = <$fin>)
+	{
+		chomp $header;
+		last unless $header =~/^\s*$/;
+	}
+}
+
 my $line;
-while ($line = <FD>)
+while ($line = <$fin>)
 {
 	chomp $line;
 	next if $line=~/^\s*$/;
@@ -63,11 +89,12 @@ while ($line = <FD>)
 	#print $key, "\n";
 	push @{$input{$key}}, $line;	#in case multiple lines have the same key
 }
-close (FD);
+close ($fin);
 
+print $header, "\n" if $withHeader;
 
-open (FD, "<$filter") || Carp::croak "can not open file $filter to read\n";
-while ($line = <FD>)
+open ($fin, "<$filter") || Carp::croak "can not open file $filter to read\n";
+while ($line = <$fin>)
 {
 	chomp $line;
 	if ($line=~/^\s*$/)
@@ -127,7 +154,7 @@ while ($line = <FD>)
 		print $prefix . "$key\t$printNoMatchText\n";
 	}
 }
-close (FD);
+close ($fin) if $input ne '-';
 
 sub joinLines 
 {

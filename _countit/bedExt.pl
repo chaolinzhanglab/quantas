@@ -182,8 +182,17 @@ while (my $line = <$fin>)
 
 	if (exists $chrLen->{$chrom})
 	{
-		$chromStart = 0 if $chromStart < 0;
-		$chromEnd = $chrLen->{$chrom} -1 if $chromEnd >= $chrLen->{$chrom};
+		if ($chromStart < 0)
+		{
+			$chromStart = 0;
+			$chromEnd = $chromStart if $chromEnd < $chromStart;
+		}
+		
+		if ($chromEnd >= $chrLen->{$chrom})
+		{
+			$chromEnd = $chrLen->{$chrom} -1;
+			$chromStart = $chromEnd if $chromStart > $chromEnd;
+		}
 	}
 
 	my $r2 = {chrom=>$r->{"chrom"},

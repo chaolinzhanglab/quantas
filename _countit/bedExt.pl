@@ -105,7 +105,7 @@ while (my $line = <$fin>)
 
 	next if $line =~/^\s*$/;
 
-	print "$i ...\n" if $verbose && $i % 100000 == 0;
+	print STDERR "$i ...\n" if $verbose && $i % 100000 == 0;
 	$i++;
 
 	my $r = lineToBed ($line);
@@ -135,7 +135,7 @@ while (my $line = <$fin>)
 		}
 		if ($chromEnd < $chromStart)
 		{
-			print "$chrom:$chromStart-$chromEnd is too small for truncation\n" if $verbose;
+			print STDERR "$chrom:$chromStart-$chromEnd is too small for truncation\n" if $verbose;
 			next;
 		}
 	}

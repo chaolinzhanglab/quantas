@@ -23,7 +23,7 @@ my $big = 0;
 my $separateStrand = 0;
 
 my $cache = getDefaultCache ($prog);
-
+my $keepCache = 0;
 
 GetOptions (
 		'big'=>\$big,
@@ -32,6 +32,7 @@ GetOptions (
 		'mean'=>\$mean,
 		'ss'=>\$separateStrand,
 		'c|cache:s'=>\$cache,
+		'keep-cache'=>\$keepCache,
 		'v|verbose'=>\$verbose);
 
 if (@ARGV != 3)
@@ -47,8 +48,9 @@ if (@ARGV != 3)
 	print " -mean          : find means instead of sum (default off)\n";
 	print " --ss           : consider the two strands separately\n";
 	print " -c             : cache dir ($cache)\n";
+	print " --keep-cache   : keep cache files\n";
 	print " -v             : verbose\n";
-	exit (0);
+	exit (1);
 }
 
 
@@ -71,6 +73,7 @@ $weight = 1 if $mean;
 my $summarizeMethod = $mean ? 'mean' : 'sum';
 my $summaryFunc = $mean ? \&mean : \&sum;
 my $bigFlag = $big ? '-big' : '';
+my $verboseFlag = $verbose ? '-v' : '';
 my $ssFlag = $separateStrand ? '--ss' : '';
 
 ##########################################
@@ -156,7 +159,7 @@ my $ASExonTagCountFile = "$cache/as.exon.tagcount.bed";
 my $weightFlag = $weight ? '-weight' : '';
 $weightFlag = '-weight-avg' if $mean;
 
-my $cmd = "perl $cmdDir/tag2profile.pl -v $bigFlag $weightFlag $ssFlag -region $ASExonBedFile $tagBedFile $ASExonTagCountFile";
+my $cmd = "perl $cmdDir/tag2profile.pl $verboseFlag $bigFlag $weightFlag $ssFlag -c $cache/tmp_exon_tag_count -region $ASExonBedFile $tagBedFile $ASExonTagCountFile";
 print $cmd, "\n" if $verbose;
 
 my $ret = system ($cmd);
@@ -200,7 +203,7 @@ if ($asType ne 'alts' && $asType ne 'altt')
 	print "match tag introns and AS introns ...\n" if $verbose;
 	my $intronMatchFile = "$cache/junction.vs.tag.match.bed";
 	#keep the score of each tag
-	$cmd = "perl $cmdDir/bedMatch.pl -v $bigFlag $ssFlag -keep-score 2 $ASIntronBedFile $tagIntronBedFile $intronMatchFile";
+	$cmd = "perl $cmdDir/bedMatch.pl $verboseFlag $bigFlag $ssFlag -cache $cache/tmp_intron_match -keep-score 2 $ASIntronBedFile $tagIntronBedFile $intronMatchFile";
 	print $cmd, "\n" if $verbose;
 
 	$ret = system ($cmd);
@@ -219,19 +222,43 @@ if ($asType ne 'alts' && $asType ne 'altt')
 		$ret = system ($cmd);
 		Carp::croak "CMD crashed: $cmd, $?\n" unless $ret == 0;
 
-		$cmd = "perl $cmdDir/uniqRow.pl -v -c $summarizeMethod $tmpFile $tmpFile";
 		#get sum or average of all tags/probesets mapped to the intron
-	
+		#$cmd = "perl $cmdDir/uniqRow.pl -v -c $summarizeMethod $tmpFile $tmpFile";
+		#print $cmd, "\n" if $verbose;
+		#$ret = system ($cmd);
+		#Carp::croak "CMD crashed: $cmd, $?\n" unless $ret == 0;
 
-		print $cmd, "\n" if $verbose;
-		$ret = system ($cmd);
-		Carp::croak "CMD crashed: $cmd, $?\n" unless $ret == 0;
+		#too much memory required to call uniqRow.pl for very big files
+		#fix 04/21/2014 Chaolin Zhang
+
+		my $fin;
+		my %junctionCountHash;
+		open ($fin, "<$tmpFile") || Carp::croak "cannot open file $tmpFile to read\n";
+		while (my $line = <$fin>)
+		{
+			chomp $line;
+			next if $line=~/^\s*$/;
+
+			my ($asId, $weight) = split ("\t", $line);
+			$junctionCountHash{$asId}->{'w'}+= $weight;
+			$junctionCountHash{$asId}->{'n'}+=1;
+		}
+		close ($fin);
+		map {$junctionCountHash{$_}->{'w'} /= $junctionCountHash{$_}->{'n'}} keys %junctionCountHash if $summarizeMethod eq 'mean';
+		
+		my $fout;
+		open ($fout, ">$tmpFile") || Carp::croak "cannot open file $tmpFile to write\n";
+		foreach my $asId (sort keys %junctionCountHash)
+		{
+			print $fout join ("\t", $asId, $junctionCountHash{$asId}->{'w'}), "\n";
+		}
+		close ($fout);
 	}
 	else
 	{
 		#$cmd = "awk '{print \$4//1}' $intronMatchFile | awk -F \"//\" '{print \$1\\t\$4}' > $tmpFile";
 	
-		$cmd = "awk '{print \$4}' $intronMatchFile | awk -F \"//\" '{print \$1}' | sort | uniq -c | awk '{print \$2\"\\t\"\$1}' > $tmpFile"; #$ASJunctionTagCountFile";
+		$cmd = "awk '{print \$4}' $intronMatchFile | awk -F \"//\" '{print \$1}' | sort -T $cache | uniq -c | awk '{print \$2\"\\t\"\$1}' > $tmpFile"; #$ASJunctionTagCountFile";
 		print $cmd, "\n" if $verbose;
 		$ret = system ($cmd);
 		Carp::croak "CMD crashed: $cmd, $?\n" unless $ret == 0;
@@ -345,7 +372,7 @@ if ($asType eq 'alts' || $asType eq 'altt')
 
 #
 
-
+#junction tag counts
 if ($asType ne 'alts' && $asType ne 'altt')
 {
 	my $junctionTagCount = readBedFile ($ASJunctionTagCountFile, $verbose);
@@ -385,6 +412,15 @@ if ($asType ne 'alts' && $asType ne 'altt')
 			if ($isoformId eq 'INC')
 			{
 				$tagCountHash{$asId}->{"INC/SKIP"}->{"junction"}->{"INC"} += $count;
+				#report the tag number of individual junctions
+				if (exists $tagCountHash{$asId}->{"INC/SKIP"}->{"junction"}->{"INC2"})
+				{
+					$tagCountHash{$asId}->{"INC/SKIP"}->{"junction"}->{"INC2"} .= "|$count";
+				}
+				else
+				{
+					$tagCountHash{$asId}->{"INC/SKIP"}->{"junction"}->{"INC2"} = $count;
+				}
 			}
 			else
 			{
@@ -460,7 +496,7 @@ if ($asType eq 'cass')
 elsif ($asType eq 'taca')
 {
 	print $fout "#", join ("\t", @fixedColumnHeader,
-			"exonTags", "inclusionJunctionTags", "skippingJunctionTags"), "\n";
+			"exonTags", "inclusionJunctionTags", "skippingJunctionTags", "individualInclusionJunctionTags"), "\n";
 }
 elsif ($asType eq 'alt5' || $asType eq 'alt3')
 {
@@ -530,11 +566,13 @@ foreach my $e (@$ASEvents)
 		{
 			my $exonTagCount = exists $ase->{"exon"} ? $ase->{"exon"} : 0;
 			my $incJunctionTagCount = exists $ase->{"junction"} && exists $ase->{"junction"}->{"INC"} ? $ase->{"junction"}->{"INC"} : 0;
+			my $incJunction2TagCount = exists $ase->{"junction"} && exists $ase->{"junction"}->{"INC2"} ? $ase->{"junction"}->{"INC2"} : "NA";
+
 			my $skipJunctionTagCount = exists $ase->{"junction"} && exists $ase->{"junction"}->{"SKIP"} ? $ase->{"junction"}->{"SKIP"} : 0;
 			print $fout join ("\t", $e->{"chrom"}, $e->{"chromStart"}, $e->{"chromEnd"}, $e->{"name"}, $e->{"score"}, $e->{"strand"}, $asType, "INC/SKIP",
 				#$summaryFunc->([$exonTagCount, $incJunctionTagCount]), $skipJunctionTagCount,
 				$exonTagCount, $skipJunctionTagCount, 
-				$exonTagCount, $incJunctionTagCount, $skipJunctionTagCount), "\n";
+				$exonTagCount, $incJunctionTagCount, $skipJunctionTagCount, $incJunction2TagCount), "\n";
 		}
 		elsif ($asType eq 'alt5' || $asType eq 'alt3')
 		{
@@ -610,5 +648,5 @@ foreach my $e (@$ASEvents)
 
 close ($fout);
 
-system ("rm -rf $cache");
+system ("rm -rf $cache") unless $keepCache;
 

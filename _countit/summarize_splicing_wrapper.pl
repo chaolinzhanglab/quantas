@@ -153,7 +153,9 @@ foreach my $asType (sort {$analyses{$a} <=> $analyses{$b}} keys %analyses)
 	my $asBedFile =  $locationInfo->{$asType};
 	my $tmpOutFile = "$cache/$asType.count.txt";
 
-	my $cmd = "perl $cmdDir/summarize_splicing.pl -type $asType $bigFlag $verboseFlag $ssFlag $weightFlag $weightAvgFlag $asBedFile $inBedFile $tmpOutFile";
+	my $typeCache = "$cache/cache_$asType";
+
+	my $cmd = "perl $cmdDir/summarize_splicing.pl -type $asType $bigFlag $verboseFlag $keepCacheFlag -c $typeCache $ssFlag $weightFlag $weightAvgFlag $asBedFile $inBedFile $tmpOutFile";
 	print "$cmd\n" if $verbose;
 	my $ret = system ($cmd);
 	print "CMD $cmd failed: $?\n" if $ret != 0;

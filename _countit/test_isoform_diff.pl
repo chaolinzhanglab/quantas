@@ -7,8 +7,6 @@ use File::Basename;
 use Carp;
 use Data::Dumper;
 
-use Scalar::Util qw(looks_like_number);
-
 use MyConfig;
 
 my $prog = basename ($0);
@@ -16,28 +14,39 @@ my $verbose = 0;
 my $dispersion = "tagwise"; #"common"
 my $MAPlotFile = "";
 my $cache = getDefaultCache ($prog);
-my $printRPKM = 0;
+my $keepCache = 0;
+
 my $base = "";
+my $isoform = 1; 
+my $controlEventFile = "";
+my $type = "cass";
 
 #my $method = "mean";  #sum
 
 GetOptions (
 	"base:s"=>\$base,
+	"type:s"=>\$type,
+	"isoform:i"=>\$isoform,
 	"disp:s"=>\$dispersion,
+	"control:s"=>\$controlEventFile,
 	"MAplot:s"=>\$MAPlotFile,
-	"rpkm"=>\$printRPKM,
 	"c:s"=>\$cache,
+	"keep-cache"=>\$keepCache,
 	"v|verbose"=>\$verbose
 );
+
+
 
 if (@ARGV != 2)
 {
 	print "test differential expression\n";
 	print "Usage $prog [options] <in.conf> <out.txt>\n";
 	print " -base         [string] : base dir of input data\n";
+	print " -type         [string] : type of AS ($type)\n";
+	print " -isoform      [int]    : isoform to compare ([1]|2)\n";
 	print " -disp         [string] : ([tagwise]|common|common:0.1)\n";
+	print " -control      [string] : control event file\n"; 
 	print " -MAplot       [file]   : file name to write MAplot\n";
-	print " -rpkm                  : include average group RPKM values\n";
 	print " -c            [dir]    : cache dir\n";
 	print " -v                     : verbose\n";
 	exit (1);
@@ -82,7 +91,7 @@ foreach my $gName (@groupNames)
 	foreach my $s (@$samples)
 	{
 		print "$iter: group=$gName, sample=$s\n" if $verbose;
-		my $inputFile = $s;
+		my $inputFile = "$s/$type.count.txt";
 		$inputFile = "$base/$inputFile" if $base ne '';
 		
 		print $fout join ("\t", $inputFile, $gName), "\n";		
@@ -101,6 +110,20 @@ print "generating R scripts ...\n" if $verbose;
 my $scriptFile = "$cache/script.R";
 open ($fout, ">$scriptFile") || Carp::croak "cannot open file $scriptFile to write\n";
 
+my $dataColId;
+if ($isoform == 1)
+{
+	$dataColId = 9;
+}
+elsif ($isoform == 2)
+{
+	$dataColId = 10;
+}
+else
+{
+	Carp::croak "isoform has to be 1 (inc) 2 (ex)\n";
+}
+
 if ($dispersion eq 'common')
 {
 	print $fout <<EOF;
@@ -114,15 +137,30 @@ groups <- as.character (conf[,2]);
 f <- files[1];
 
 d <- read.table (f, sep="\\t", header=F);
-gene.names <- d[,2];
+gene.names <- d[,4];
 
-d <- readDGE (files, columns=c(1,3), group=groups);
+d <- readDGE (files, columns=c(4,$dataColId), group=groups);
+d <- calcNormFactors(d)
+
+controlIdx <- 0;
+if(file.exists("$controlEventFile"))
+{
+	controls <- read.table ("$controlEventFile", sep="\t", header=F);
+	controlIdx <- as.vector (controls[,2]);
+}
 
 d\$common.dispersion <- $commonDisp;
 
 if (d\$common.dispersion <= 0)
 {
-	if (min(table(groups))>=2)
+	if(sum(controlIdx)>0)
+	{
+		d1 <- d;
+		d1\$samples\$group <- 1;
+		d0 <- estimateCommonDisp(d1[controlIdx>0,]);
+		d\$common.dispersion <- d0\$common.dispersion;
+	}
+	else if (min(table(groups))>=2)
 	{
 		d <- estimateCommonDisp(d);
 	}
@@ -195,7 +233,7 @@ if ($MAPlotFile)
 
 detags.diff.tagwise <- rownames(de.tagwise\$table[p.adj <0.05 & abs(log2FC) > 1,])
 pdf (file="$MAPlotFile")
-plotSmear(de.tagwise, pair=c("$groupNames[1]", "$groupNames[0]"), de.tags = detags.diff.tagwise, main = "MA Plot Using Tagwise Dispersion")
+plotSmear(d, pair=c("$groupNames[1]", "$groupNames[0]"), de.tags = detags.diff.tagwise, main = "MA Plot Using Tagwise Dispersion")
 #abline(h = c(-1, 1), col = "dodgerblue", lwd = 2)
 dev.off()
 EOF
@@ -226,117 +264,7 @@ my $cmd = "R --no-save < $scriptFile";
 $ret = system ($cmd);
 Carp::croak "cmd=$cmd failed\n" unless $ret == 0;
 
-#system ("rm -rf $cache");
-
-if ($printRPKM)
-{	
-	print "Calculating average RPKM...\n";
-
-	# (my $outFileRPKM = $outFile) =~ s/.txt$/.rpkm.txt/;
-	# $outFileRPKM .= ".rpkm" if ($outFileRPKM !~ m/.rpkm.txt$/);
-
-	my $outFileRPKM = "$cache/$outFile.rpkm";
-
-	my %RPKMs;
-
-	foreach my $group (@groupNames)
-	{
-		my $samples = $groups->{$group}->{"samples"};
-		foreach my $sample (@$samples)
-		{
-			my $inputFile = $sample;
-			$inputFile = "$base/$inputFile" if $base ne '';
-			open (INFILE, $inputFile) || Carp::croak "cannot open file $inputFile to read\n";
-			my $totalTagNum = 0;
-			while (my $line = <INFILE>)
-			{
-				chomp $line;
-				next if $line=~/^\s*$/;
-				next if $line=~/^\#/;
-				my ($gene_id, $gene_symbol, $tag_num, $exon_length, $rpkm) = split(/\t/, $line);
-				# $RPKMs{$gene_id}{$sample} = $rpkm if ($rpkm =~ m/^\d+\.?\d*[Ee]?-?\d*$/);
-				#$RPKMs{$gene_id}{$sample} = $rpkm if (looks_like_number($rpkm));
-				$RPKMs{$gene_id}{$sample} = [$tag_num, $exon_length];
-				$totalTagNum += $tag_num;
-			}
-			close (INFILE);
-
-			foreach my $gene_id (keys %RPKMs)
-    		{
-        		my $tagNum = $RPKMs{$gene_id}{$sample}[0];
-				my $exonLen = $RPKMs{$gene_id}{$sample}[1];
-
-        		$tagNum = 1 if $tagNum == 0;
-        		$RPKMs{$gene_id}{$sample} = $tagNum * 1e9 / $exonLen / $totalTagNum;
-    		}
-		}
-
-	}
-
-	my %RPKMMeans;
-
-	foreach my $gene (keys %RPKMs)
-	{
-		foreach my $group (@groupNames)
-		{
-			my $sum = 0;
-			
-			my $samples = $groups->{$group}->{"samples"};
-			foreach my $sample (@$samples)
-			{
-				if (exists($RPKMs{$gene}{$sample}))
-				{
-					$sum += $RPKMs{$gene}{$sample};
-				}
-				else
-				{
-					Carp::carp "Missing value for gene $gene in sample $sample\n";
-				}				
-			}
-			
-			$RPKMMeans{$gene}{$group} = $sum / (scalar @$samples);
-		}
-	}
-
-	open (INFILE, $outFile) || Carp::croak "cannot open $outFile to read\n";
-	open (OUTFILE, ">$outFileRPKM") || Carp::croak "cannot open $outFileRPKM to write";
-
-	my $count = -1;
-	while (my $line = <INFILE>)
-	{
-		$count++;
-		chomp $line;
-
-		print OUTFILE $line;
-
-		# header
-		if ($count == 0)
-		{
-			foreach my $group (@groupNames)
-			{
-				print OUTFILE "\tRPKM($group)";
-			}
-		}
-		else
-		{
-			my @splits = split(/\t/, $line);
-			my $gene = $splits[0];
-
-			foreach my $group (@groupNames)
-			{
-				print OUTFILE "\t$RPKMMeans{$gene}{$group}";
-			}
-		}
-
-		print OUTFILE "\n";
-	}
-	close INFILE;
-	close OUTFILE;
-
-    system(("mv", $outFileRPKM, $outFile)) == 0 or die "Moving temp RPKM file failed: $?"
-}
-
-print "Done.\n";
+system ("rm -rf $cache") unless $keepCache;
 
 
 sub readConfigFile

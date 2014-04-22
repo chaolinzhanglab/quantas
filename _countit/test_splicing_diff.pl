@@ -47,8 +47,8 @@ if (@ARGV != 2)
 	print "Usage $prog [options] <in.conf> <out.txt>\n";
 	print " <in.conf> [string]: the first column is the dir or file name, and the second column is the group name\n";
 	print " -base            [string] : base dir of input data\n";
-	print " -type            [string] : AS type ([cass]|taca|alt5|alt3|mutx|iret|apa)\n";
-	print " -test            [string] : statistical test method ([fisher]|chisq|g)\n";
+	print " -type            [string] : AS type ([cass]|taca|alt5|alt3|mutx|iret|apa|snv)\n";
+	print " -test            [string] : statistical test method ([fisher]|chisq|g|glm)\n";
 	print " --min-cov        [int]    : min coverage to calculate FDR ($minCoverage)\n";
 	print " --id2gene2symbol [file]   : mapping file of id to gene to symbol\n";
 	print " --filter-output           : filter output by FDR and dI\n";
@@ -170,9 +170,11 @@ for (my $g = 0; $g < @groupNames; $g++)
 }
 
 
+
 print "performing statistical analysis ...\n" if $verbose;
 
 my $pvalues;
+
 
 if ($test eq 'fisher')
 {
@@ -185,6 +187,10 @@ elsif ($test eq 'chisq')
 elsif ($test eq 'g')
 {
 	$pvalues = GTest (\%sampleData, $groups, $verbose);
+}
+elsif ($test eq 'glm')
+{
+	$pvalues = glmTest (\%sampleData, $groups, $verbose);
 }
 else
 {
@@ -282,7 +288,7 @@ for (my $i = 0; $i < $nAS; $i++)
 		my $asId = $ASInfo->[$i][3];
 		my @cols = split ("-", $asId);
 
-		my $nAltExon = $cols[2];
+		my $nAltExon = $cols[2] eq 'sr' ? $cols[1] : $cols[2];
 
 		$n1 = $inc1 + $ex1 * ($nAltExon+1);
 		$n2 = $inc2 + $ex2 * ($nAltExon+1);
@@ -290,7 +296,7 @@ for (my $i = 0; $i < $nAS; $i++)
 		$phi1 = $n1 > 0 ? $inc1/$n1 : 'NA';
 		$phi2 = $n2 > 0 ? $inc2/$n2 : 'NA';
 	}
-	elsif ($type eq 'apa')
+	elsif ($type eq 'apa' || $type eq 'snv')
 	{
 		#0              1          
 		#isoform1Tags	isoform2Tags
@@ -329,7 +335,9 @@ for ($i = 0; $i < $nAS; $i++)
 {
 	my $q = $statResultSort[$i][4] * $npass / ($i+1);
 	$statResultSort[$i][5] = $q;
-	last if $q >= 1;
+	#last if $q >= 1;
+	last if $q >= 1 || $i >= $npass;
+	#bug fix: Chaolin Zhang, 04/11/2014
 }
 
 for (; $i < $nAS; $i++)
@@ -355,6 +363,10 @@ if ($type eq 'alt5' || $type eq 'alt3')
 elsif ($type eq 'apa')
 {
 	push @header, qw(geneId site1Pos site2Pos);
+}
+elsif ($type eq 'snv')
+{
+	push @header, qw(refBase altBase);
 }
 
 #header for statistics columns
@@ -393,6 +405,11 @@ elsif ($type eq 'apa')
 {
 	push @header, qw(isoform1Tags_g1 isoform2Tags_g1);
 	push @header, qw(isoform1Tags_g2 isoform2Tags_g2);
+}
+elsif ($type eq 'snv')
+{
+	push @header, qw(isoform1Tags_g1 isoform2Tags_g1 refSense_g1    refAntisense_g1    altSense_g1    altAntisense_g1);
+	push @header, qw(isoform1Tags_g2 isoform2Tags_g2 refSense_g2    refAntisense_g2    altSense_g2    altAntisense_g2);
 }
 else
 {
@@ -476,6 +493,9 @@ sub readASDataFile
 		{
 			@infoCols = @cols[0..7];
 			@dataCols = @cols[8..$#cols];
+			pop @dataCols if @dataCols > 5 && $type eq 'taca';
+			#to exclude the last column of taca in the new format
+			#04/17/2014
 		}
 		elsif ($type eq 'alt3' || $type eq 'alt5')
 		{
@@ -491,6 +511,13 @@ sub readASDataFile
 			push @infoCols, @cols[10..$#cols];
             @dataCols = @cols[8..9];
         }
+		elsif ($type eq 'snv')
+		{
+			@infoCols = @cols[0..7];
+			push @infoCols, @cols[10..11];
+			@dataCols = @cols[8..9];
+			push @dataCols, @cols[12..$#cols];
+		}
 		else
 		{
 			Carp::croak "incorrect AS type: $type\n";
@@ -771,4 +798,128 @@ EOF
 	return \@p;
 }
 
+sub glmTest
+{
+	my ($sampleData, $groups, $verbose) = @_;
 
+	my @groupNames = sort {$groups->{$a}->{"id"} <=> $groups->{$b}->{"id"}} keys %$groups;
+	my %sampleData = %$sampleData;
+
+	my $nAS = @{$sampleData{$groups->{$groupNames[0]}->{"samples"}->[0]}};
+
+	print "$nAS\n";
+
+
+	print "generating data and script for statistical test ...\n" if $verbose;
+	
+
+	my $fout;
+
+	my $groupsMatrix = "";
+
+	my $i = -1;
+	foreach my $gName (@groupNames)
+	{
+		$i++;
+		my $samples = $groups->{$gName}->{"samples"};
+		for (my $j = 0; $j < @$samples; $j++)
+		{
+			$groupsMatrix .= ",$i";
+		}
+	}
+	$groupsMatrix = substr($groupsMatrix,1);
+	print "($groupsMatrix)\n";
+
+	my $testDataFile = "$cache/data.txt";
+	open ($fout, ">$testDataFile") || Carp::croak "cannot open file $testDataFile to write\n";
+	for (my $i = 0; $i < $nAS; $i++)
+	{
+		my @iso1;
+		my @iso2;
+		my $dataOut = "";
+		foreach my $gName (@groupNames)
+		{
+			my $samples = $groups->{$gName}->{"samples"};
+			foreach my $s (@$samples)
+			{
+				# print "$iter: group=$gName, sample=$s\n" if $verbose;
+				#for (my $i = 0; $i < $nAS; $i++)
+				#{
+					my $d = $sampleData{$s}->[$i];
+					#$testData[$s][$i][0] = $d->[0];
+					#$testData[$s][$i][1] = $d->[1];
+					push(@iso1, $d->[0]);
+					push(@iso2, $d->[1]);
+					#$dataOut .= "\t$d";				
+				#}
+				$iter++;
+			}
+		}
+		my @isos = (@iso1, @iso2);
+		foreach my $iso (@isos)
+		{
+			$dataOut .= "\t$iso";
+		}
+
+		$dataOut = substr($dataOut,1);
+		print $fout "$dataOut\n";
+	}
+	close ($fout);
+
+	#write R script
+	my $testOutFile = "$cache/p.txt";
+	
+	my $testScriptFile = "$cache/test.R";
+	open ($fout, ">$testScriptFile") || Carp::croak "cannot open file $testScriptFile to write\n";
+
+	print $fout <<EOF;
+
+data <- read.table ("$testDataFile", sep="\\t", header=F);
+n <- dim(data)[1];
+
+p <- 1:n;
+for (i in 1:n)
+{
+	if (i-as.integer(i/1000) * 1000 == 0)
+	{
+		cat (sprintf("%d\\n",i));
+	}
+
+	curdata = round(as.matrix(data[i,])+0.51)
+	dat <- matrix(curdata, ncol=2)
+	groups <- matrix(data=c($groupsMatrix),ncol=1)
+	model = glm(dat~groups, family=binomial(link="logit"))
+	p[i] <- summary(model)\$coef\[, "Pr(>|z|)"][2]
+}
+
+write.table (p, "$testOutFile", sep="\\t", quote=F, row.names=F, col.names=F);
+
+EOF
+	
+ 	close ($fout);
+
+ 	my $cmd = "R --no-save < $testScriptFile";
+ 	$cmd = "$cmd > /dev/null" unless $verbose;
+	
+ 	print "$cmd\n" if $verbose;
+
+ 	my $ret = system ($cmd);
+ 	Carp::croak "cmd=$cmd failed: $?\n" if $ret != 0;
+
+
+ 	#read test output
+ 	print "reading test results from $testOutFile ...\n" if $verbose;
+ 	my $fin;
+ 	open ($fin, "<$testOutFile") || Carp::croak "cannot open file $testOutFile to read\n";
+ 	my @p;
+ 	my $line;
+ 	while (my $line = <$fin>)
+ 	{
+ 		chomp $line;
+ 		next if $line=~/^\s*$/;
+ 		push @p, $line;
+ 	}
+ 	close ($fin);
+
+	return \@p;
+}

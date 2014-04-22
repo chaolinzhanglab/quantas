@@ -17,7 +17,7 @@ my $prog = basename ($0);
 
 my $regionFile = "";
 my $separateStrand = 0;
-my $completeOverlap = 0;
+my $denominator = "tag"; #region
 my $verbose = 0;
 my $ext5 = 0;
 my $ext3 = 0;
@@ -29,12 +29,14 @@ my $keepCache = 0;
 my $reverse = 0; #find nonoverlapping tags
 my $big = 0;
 my $minBlockSize = 2000000;
+my $completeOverlap = 0;
 
 GetOptions (
 		'ext5:i'=>\$ext5,
 		'ext3:i'=>\$ext3,
 		'region:s'=>\$regionFile,
 		'ss|sep-strand'=>\$separateStrand,
+		'denom:s'=>\$denominator,
 		'complete-overlap'=>\$completeOverlap,
 		'r'=>\$reverse,
 		'd:s'=>\$delimitor,
@@ -56,6 +58,7 @@ if (@ARGV != 2)
 	print " -ext3        [int]: extension of tags at the 3' end\n";
 	print " -region     [file]: a bed file with regions to count tag numbers.\n";
 	print " -ss               : separate strand (off)\n";
+	print " --denom   [string]: denominator to calculate overlap fraction ([tag]|region)\n";
 	print " --complete-overlap: requires complete overlap of the tag with the region\n";
 	print " -r                : reverse mode to print tags without ovrlap with the region (off)\n";
 	print " -d        [string]: delimitor to separate ids\n";
@@ -376,29 +379,66 @@ sub findOverlapTags
 					$tags->[$i]->{"overlap"} = 1;
 					if ($reverse == 0)
 					{
-						my %r = %{$tags->[$i]};
-						$r{"name"} .= $delimitor . $r->{"name"};
+						my %t = %{$tags->[$i]};
+						$t{"name"} .= $delimitor . $r->{"name"};
 						my $start = max($chromStart, $tags->[$i]->{"chromStart"});
 						my $end = min ($chromEnd, $tags->[$i]->{"chromEnd"});
 	
-						my $score = ($end - $start + 1) / ($tags->[$i]->{"chromEnd"} - $tags->[$i]->{"chromStart"} + 1);
-
-						#$tags->[$i]->{"name"} .= "//" . $r->{"name"};
-						$r{"score"} = $score unless $keepScore;
+						my $score = calcOverlapScore ($tags->[$i], $r, $denominator);
+						$t{"score"} = $score unless $keepScore;
 						
 						if ($completeOverlap)
 						{
-							print $fout bedToLine (\%r), "\n" if $score == 1;
+							print $fout bedToLine (\%t), "\n" if $score >= 1 - 1e-10;
 						}
 						else
 						{
-							print $fout bedToLine (\%r), "\n";
+							print $fout bedToLine (\%t), "\n";
 						}
 					}
 				}
 			}
 			$i++;
 		}
+	}
+}
+
+sub calcOverlapScore
+{
+	my ($tag, $region, $denominator) = @_;
+	#we assume region is a simple interval without exon/intron structure
+	#but tag may have exon/introns
+	#we also assume there is overlap between tag and region here
+
+	if (exists $tag->{'blockCount'} && $tag->{'blockCount'} > 1)
+	{
+		my $tagStart = $tag->{'chromStart'};
+		my $tagExonLen = 0;
+		my $o = 0;
+		for (my $i = 0; $i < $tag->{'blockCount'}; $i++)
+		{
+			my $exonStart = $tagStart + $tag->{'blockStarts'}[$i];
+			my $exonEnd = $exonStart + $tag->{'blockSizes'}[$i] - 1;
+			
+			my $start = max($region->{'chromStart'}, $exonStart);
+			my $end = min($region->{'chromEnd'}, $exonEnd);
+			my $o2 = $end - $start + 1;
+			$o += $o2 if $o2 > 0;
+			$tagExonLen += $tag->{'blockSizes'}[$i];
+		}
+
+		my $d = $denominator eq 'tag' ? $tagExonLen : $region->{'chromEnd'}-$region->{'chromStart'}+1;
+		
+		return $o > 0 ? $o / $d : 0;
+	}
+	else
+	{
+		my $start = max($region->{'chromStart'}, $tag->{'chromStart'});
+		my $end = min($region->{'chromEnd'}, $tag->{'chromEnd'});
+		
+		my $d = $denominator eq 'tag' ? ($tag->{'chromEnd'} - $tag->{'chromStart'} + 1) : ($region->{'chromEnd'}-$region->{'chromStart'}+1);
+		my $o = $end - $start + 1;
+		return $o > 0 ? $o / $d : 0;
 	}
 }
 

@@ -37,7 +37,7 @@ if (@ARGV != 2)
 	print "Usage $prog [options] <in.conf> <out.txt>\n";
 	print " <in.conf> [string]: the first column is the dir or file name, and the second column is the group name\n";
 	print " -base         [string] : base dir of input data\n";
-	print " -type         [string] : AS type ($type)\n";
+	print " -type         [string] : AS type ([cass]|taca|alt5|alt3|mutx|iret|apa|snv|snv2ss)\n";
 	print " --avg                  : use average instead of sum\n";
 	print " --min-cov     [int]    : min coverage ($minCoverage)\n";
 	print " --max-std     [float]  : max standard deviation ($maxStd)\n";
@@ -77,6 +77,12 @@ if (-f $id2gene2symbolFile)
 
 	close ($fin);
 }
+elsif ($id2gene2symbolFile ne '')
+{
+	Carp::croak "cannot open file $id2gene2symbolFile to read\n";
+}
+
+
 my $n = keys %id2gene2symbolHash;
 
 print "$n mapping entries loaded\n" if $verbose;
@@ -198,10 +204,11 @@ for (my $i = 0; $i < $nAS; $i++)
 			$in = $d->[3];
 			my $asId = $ASInfo->[$i][3];
 			my @cols = split ("-", $asId);
-        	my $nAltExon = $cols[2];
+        	my $nAltExon = $cols[2] eq 'sr' ? $cols[1] : $cols[2];
+			
 			$ex = $d->[4] * ($nAltExon+1);
 		}
-		elsif ($type eq 'apa')
+		elsif ($type eq 'apa' || 'snv' || 'snv2ss')
 		{
 			$in = $d->[0]; #site 1
 			$ex = $d->[1]; #site 2
@@ -299,6 +306,9 @@ sub readASDataFile
         {
             @infoCols = @cols[0..7];
             @dataCols = @cols[8..$#cols];
+			pop @dataCols if @dataCols > 5 && $type eq 'taca';
+            #to exclude the last column of taca in the new format
+            #04/17/2014
         }
         elsif ($type eq 'alt3' || $type eq 'alt5')
         {
@@ -307,13 +317,19 @@ sub readASDataFile
             @dataCols = @cols[8..9];
             push @dataCols, @cols[11..$#cols];
         }
-		elsif ($type eq 'apa')
+		elsif ($type eq 'apa' || $type eq 'snv')
         {
             #polyA seq data
             @infoCols = @cols[0..7];
             push @infoCols, @cols[10..$#cols];
             @dataCols = @cols[8..9];
         }
+		elsif ($type eq 'snv2ss')
+		{
+			@infoCols = @cols[0..7];
+			push @infoCols, @cols[10..12];
+			@dataCols = @cols[8..9];
+		}
         else
         {
             Carp::croak "incorrect AS type: $type\n";

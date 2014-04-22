@@ -23,15 +23,18 @@ my $genomeDir = "";
 my $organism = "mm9";
 my $verbose = 0;
 my $canonical = 0; #GT/AG, GC/AG, AT/AC
+my $GTAG = 0;
 my $anchor = 0;	#min size of the terminal block
 
 my $cache = getDefaultCache ($prog);
+
 
 GetOptions (
 			'big'=>\$bigFile,
 			'weight'=>\$weight,
 			'ss'=>\$separateStrand,
 			'can'=>\$canonical,
+			'gtag'=>\$GTAG,
 			'a:i'=>\$anchor,
 			'org:s'=>\$organism,
 			'gd:s'=>\$genomeDir,
@@ -44,10 +47,12 @@ if (@ARGV != 2)
 	print "identify unique junctions from junctionreads and infer strand\n";
 	
 	print "Usage: $prog [options] <in.bed> <out.bed>\n";
+	print " <in.bed>         : use - for stdin\n";
 	print " -big             : set when the input file is big\n";
 	print " -ss              : separate strand\n";
 	print " -weight          : consider the weight of each tag\n";
 	print " -can             : canonical splice sites only (GT/AG, GC/AG, AT/AC)\n";
+	print " -gtag            : GT/AG only (effective with -can)\n";
 	print " -a      [int]    : anchor size of the terminal block ($anchor)\n";
 	print " -org    [string] : organism <[mm9]|mm8|mm6|mm5|rn4|rn3|hg17|hg18|sacCer1|dm2|ce2>\n";
 	print " -gd     [string] : directory of fasta files [$genomeDir] (will override -org)\n";
@@ -117,8 +122,14 @@ my @strands = qw(+ -);
 
 
 my $fout;
-open ($fout, ">$outBedFile") || Carp::croak "can not open file $outBedFile to write\n";
-
+if ($outBedFile eq '-')
+{
+	$fout = *STDOUT;
+}
+else
+{
+	open ($fout, ">$outBedFile") || Carp::croak "can not open file $outBedFile to write\n";
+}
 
 foreach my $chrom (sort keys %tagCount)
 {
@@ -177,7 +188,7 @@ foreach my $chrom (sort keys %tagCount)
 			}
 			else
 			{
-				$introns{$key} = {chromStart=>$upstreamExonStart, chromEnd=>$downstreamExonEnd, count=>$score};
+				$introns{$key} = {chromStart=>$upstreamExonStart, chromEnd=>$downstreamExonEnd, count=>$score, tag=>$t};
 			}
 		}
 	}
@@ -219,9 +230,11 @@ foreach my $chrom (sort keys %tagCount)
 				#get the sense strand of the splice sites
 				$spliceSites = revcom ($spliceSites) if $strand eq '-';
 				my $isCanonical = $spliceSites eq 'GTAG' || $spliceSites eq 'GCAG' || $spliceSites eq 'ATAC';
+				$isCanonical = $spliceSites eq 'GTAG' if $GTAG;
+
 				if ($isCanonical == 0)
 				{
-					warn "non-canonical splice sites=$spliceSites, skipped: $key\n";
+					warn "non-canonical splice sites=$spliceSites, skipped: $key, tag=", Dumper($i->{'tag'}), "\n";
 					next;
 				}
 			}
@@ -229,9 +242,11 @@ foreach my $chrom (sort keys %tagCount)
 			{
 				my $isCanonical = $spliceSites eq 'GTAG' || $spliceSites eq 'GCAG' || $spliceSites eq 'ATAC';
 				$isCanonical = $isCanonical || $spliceSites eq 'CTAC' || $spliceSites eq 'CTGC' || $spliceSites eq 'GTAT';
+				$isCanonical = $spliceSites eq 'GTAG' || $spliceSites eq 'CTAC' if $GTAG;
+
 				if ($isCanonical == 0)
 				{
-					warn "non-canonical splice sites=$spliceSites, skipped: $key\n";
+					warn "non-canonical splice sites=$spliceSites, skipped: $key, tag=", Dumper($i->{'tag'}), "\n";
 					next;
 				}
 				
@@ -252,7 +267,7 @@ foreach my $chrom (sort keys %tagCount)
 	}
 	print "$iter introns passed filtering on chrom $chrom\n" if $verbose;
 }
-close ($fout);
+close ($fout) if $outBedFile ne '-';
 
 system ("rm -rf $cache");
 

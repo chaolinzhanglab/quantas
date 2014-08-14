@@ -13,7 +13,11 @@ use Common;
 
 my $prog = basename ($0);
 my $geneContigBedFile = "";
-my $separateStrand = 0;
+#my $separateStrand = 0;
+my $libraryType = "unstranded";
+# or 'stranded-sa': read1 is sense and read2 is antisense
+# 'stranded-as' : read1 is antisense and read2 is sense
+
 
 my $insertSizeDistFile = "";
 my %insertSizeDist = ();
@@ -35,7 +39,8 @@ GetOptions ("v|verbose"=>\$verbose,
 	"gene:s"=>\$geneContigBedFile,
 	'size-dist:s'=>\$insertSizeDistFile,
 	'use-prior'=>\$usePrior,
-	"ss|sep-strand"=>\$separateStrand,
+	#"ss|sep-strand"=>\$separateStrand,
+	"library-type:s"=>\$libraryType,
 	#"ignore-junction"=>\$ignoreJunctionFromInput,
 	"print-singleton"=>\$printSingleton,
 	"cache:s"=>\$cache);
@@ -46,25 +51,41 @@ GetOptions ("v|verbose"=>\$verbose,
 #
 
 
+#notes for stranded vs unstranded library, Chaolin Zhang, June 16, 2014
+#for unstranded library, we assume read1 and read2 are on the opposite strand
+#in the output, successfully paired reads will adopt the strand of read1, singleton reads will adopt the original strand
+
+#for stranded library, we also gave the sense strand, based on the library type. specifically
+#for stranded-as: the strand of paired read or singleton read1 is flipped
+#for stranded-sa: the strand of singleton read2 is flipped
+
+
+
 if (@ARGV != 3)
 {
 	print "combine paired reads in the same gene and with proper location/orientation\n";
 	print "Usage: $prog [options] <5end.bed> <3end.bed> <pair.bed>\n";
-	print " -gene    [file]  : gene contig bed file to limit paired reads in the same gene\n";
-	print " -use-prior       : use informative priors specified in score column of the gene file\n";
-	print " -size-dist[file] : file specifying insert size distribution\n";
-	print " -ss              : separate strand\n";
+	print " -gene           [file]  : gene contig bed file to limit paired reads in the same gene\n";
+	print " -use-prior              : use informative priors specified in score column of the gene file\n";
+	print " -size-dist      [file]  : file specifying insert size distribution\n";
+	#print " -ss              : separate strand\n";
+	print " --library-type  [string]: library  type ([unstranded]|stranded-as|stranded-sa)\n";
 	#print " --ignore-junction: ignore SE junction reads in the input\n";
-	print " -big             : big read file\n";
-	print " -print-singleton : print reads not in pairs\n";
-	print " -cache           : cache dir ($cache)\n";
-	print " -v               : verbose\n";
+	print " -big                    : big read file\n";
+	print " -print-singleton        : print reads not in pairs\n";
+	print " -cache                  : cache dir ($cache)\n";
+	print " -v                      : verbose\n";
 	exit (1);
 }
 
 
 print "use prior=$usePrior\n" if $verbose;
 my ($fivePrimeBedFile, $threePrimeBedFile, $combineBedFile) = @ARGV;
+
+if ($libraryType ne 'unstranded' && $libraryType ne 'stranded-sa' && $libraryType ne 'stranded-as')
+{
+	Carp::croak "incorrect library type: $libraryType\n";
+}
 
 
 Carp::croak "$cache already exist\n" if -d $cache;
@@ -155,7 +176,8 @@ else
 		$c->{'name'} = $i;
 		$i++;
 
-		if ($separateStrand)
+		#if ($separateStrand)
+		if ($libraryType ne 'unstranded')
 		{
 			Carp::croak "no strand information in ", Dumper ($c), "\n" unless exists $c->{"strand"};
 			my $strand = $c->{"strand"};
@@ -260,7 +282,8 @@ foreach my $chrom (sort keys %chromHash)
 				$c->{'name'} = $i;
 				$i++;
 
-				my $s = $separateStrand ? $c->{'strand'} : 'b';
+				#my $s = $separateStrand ? $c->{'strand'} : 'b';
+				my $s = $libraryType eq 'unstranded' ? 'b' : $c->{'strand'};
 				push @{$contigsOnChrom->{$s}}, $c;
 			}
 		}
@@ -294,7 +317,9 @@ foreach my $chrom (sort keys %chromHash)
 
 	#find overlapping genes for each of the reads
 	my @strand = ('b');
-	@strand = qw (+ -) if $separateStrand;
+	#@strand = qw (+ -) if $separateStrand;
+	@strand = qw (+ -) if $libraryType ne 'unstranded';
+
 	
 	print "find overlapping genes for each reads on $chrom ...\n" if $verbose;
 
@@ -309,25 +334,69 @@ foreach my $chrom (sort keys %chromHash)
 		{
 			$t->{'3end'} = $t->{"strand"} eq '+' ? $t->{'chromEnd'} : $t->{"chromStart"};
 			$t->{'len'} = exists $t->{'blockCount'} ? sum($t->{'blockSizes'}) : ($t->{'chromEnd'} - $t->{'chromStart'} + 1);
-			push @tags, $t if $s eq 'b' || $t->{"strand"} eq $s;
+
+			#push @tags, $t if $s eq 'b' || $t->{"strand"} eq $s;
+			#changed by Chaolin Zhang June 16, 2014
+			if ($libraryType eq 'unstranded')
+			{
+				push @tags, $t;
+			}
+			elsif ($libraryType eq 'stranded-sa')
+			{
+				#require read1 to be on the same strand of contig
+				push @tags, $t if $t->{'strand'} eq $s;
+			}
+			elsif ($libraryType eq 'stranded-as')
+			{
+				#require read1 to be on the opposite strand of config
+				push @tags, $t if $t->{'strand'} ne $s;
+			}
+			else
+			{
+				Carp::croak "incorrect library type: $libraryType\n";
+			}
 		}
 		my $n = @tags;
 
 		#we cluster 5' and 3' tags separately to save some memory
 		print "clustering $n 5' tags to genes on strand $s of $chrom ...\n" if $verbose;
 		findOverlapTags (\@tags, $contigsOnChrom->{$s}) if @tags > 0;
+		#note that strand requirement is already fullfilled in the filtered tags, so we do not check strand in this function
+
 		@tags = ();
 
 		foreach my $t (@$threePrimeReads)
 		{
 			$t->{'3end'} = $t->{"strand"} eq '+' ? $t->{'chromEnd'} : $t->{"chromStart"};
 			$t->{'len'} = exists $t->{'blockCount'} ? sum($t->{'blockSizes'}) : ($t->{'chromEnd'} - $t->{'chromStart'} + 1);
-			push @tags, $t if $s eq 'b' || $t->{"strand"} ne $s; #note that the strand is flipped here
+			
+			#push @tags, $t if $s eq 'b' || $t->{"strand"} ne $s; #note that the strand is flipped here
+			#changed by Chaolin Zhang June 16, 2014
+
+            if ($libraryType eq 'unstranded')
+            {
+                push @tags, $t;
+            }
+            elsif ($libraryType eq 'stranded-sa')
+            {
+                #require read2 to be on the opposite strand of contig
+                push @tags, $t if $t->{'strand'} ne $s;
+            }
+            elsif ($libraryType eq 'stranded-as')
+            {
+                #require read2 to be on the same strand of config
+                push @tags, $t if $t->{'strand'} eq $s;
+            }
+            else
+            {
+                Carp::croak "incorrect library type: $libraryType\n";
+            }
 		}
 
 		$n = @tags;
 		print "clustering $n 3' tags to genes on strand $s of $chrom ...\n" if $verbose;
 		findOverlapTags (\@tags, $contigsOnChrom->{$s}) if @tags > 0;
+		#note that strand requirement is already fullfilled in the filtered tags, so we do not check strand in this function
 
 		@tags = ();
 	}
@@ -364,6 +433,9 @@ foreach my $chrom (sort keys %chromHash)
 		{
 			$r3->{"name"} .= "//3";
 			$r3->{"score"} = 1;
+			
+			flipStrand ($r3) if $libraryType eq 'stranded-sa'; 
+			#this is because we know read2 is on antisense strand
 
 			print $fout bedToLine (bedToFull($r3)), "\n" if $printSingleton;
 			next;
@@ -447,6 +519,9 @@ foreach my $chrom (sort keys %chromHash)
 					my $pair = combineRegions ([$r5, $r3, $uniqPaths->[$i]]);
 					$pair->{"score"} = $probs->[$i];
 					$pair->{"name"} .= "//p$i//" . sprintf("%.2f", $probs->[$i]);
+					
+					#$pair adopts the same strand as $r5
+					flipStrand ($pair) if $libraryType eq 'stranded-as';
 
 					print $fout bedToLine ($pair), "\n";
 				}
@@ -459,6 +534,8 @@ foreach my $chrom (sort keys %chromHash)
 				my $pair = combineRegions ([$r5, $r3]);
 				$pair->{'score'} = 1;
 				$pair->{'name'} .="//p";
+
+				flipStrand ($pair) if $libraryType eq 'stranded-as';
 				print $fout bedToLine ($pair), "\n";
 
 			}
@@ -472,6 +549,8 @@ foreach my $chrom (sort keys %chromHash)
 			#illegal pair, although both reads mapped successfully
 			$r3->{"name"} .= "//3";
 			$r3->{"score"} = 1;
+			flipStrand ($r3) if $libraryType eq 'stranded-sa';
+
 			print $fout bedToLine (bedToFull($r3)), "\n" if $printSingleton;
 		}
 		#Carp::croak "done\n" if $found && $debug;
@@ -483,6 +562,8 @@ foreach my $chrom (sort keys %chromHash)
 		{
 			$r5->{"name"} .= "//5";
 			$r5->{"score"} = 1;
+
+			flipStrand ($r5) if $libraryType eq 'stranded-as';
 			print $fout bedToLine (bedToFull($r5)), "\n"
 			unless exists $r5->{"match"};
 		}
@@ -663,6 +744,22 @@ sub findOverlapTags
 	}
 	@tags = ();
 	@regions = ();
+}
+
+sub flipStrand
+{
+	my $read = $_[0];
+	Carp::croak "incorrect strand info:", Dumper ($read), "\n"
+	unless exists $read->{'strand'} && ($read->{'strand'} eq '+' || $read->{'strand'} eq '-');
+
+	if ($read->{'strand'} eq '+')
+	{
+		$read->{'strand'} = '-';
+	}
+	elsif ($read->{'strand'} eq '-')
+	{
+		$read->{'strand'} = '+';
+	}
 }
 
 

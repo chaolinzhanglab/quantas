@@ -20,10 +20,12 @@ my $progDir = dirname ($0);
 my $knownSiteFile = "";
 my $keepGeneInfo = 0;
 my $keepScore = 0;
+my $countStrand = "";
 
 
 GetOptions (
 	"l:s"=>\$knownSiteFile,
+	"count-strand:s"=>\$countStrand,
 	"keep-score"=>\$keepScore,
 	"keep-gene"=>\$keepGeneInfo,
 	"v"=>\$verbose);
@@ -32,17 +34,23 @@ if (@ARGV != 2)
 {
 	print "summarize snv extracted from RNASeq data\n";
 	print "Usage: $prog [options] <in.vcf> <out.txt>\n";
-	print " <in.vcf>        : use - for STDIN\n";
-	print " -l      [string]: a vcf file with list of known sites (optionally with strand info) to summarize\n";
-	print " --keep-score    : keep score in snv\n";
-	print " --keep-gene     : keep gene information\n";
-	print " -v              : verbose\n";
+	print " <in.vcf>                : use - for STDIN\n";
+	print " -l      [string]        : a vcf file with list of known sites (optionally with strand info) to summarize\n";
+	print " --count-strand [string] : only count reads on the specified strand ([+]|-)\n";
+	print " --keep-score            : keep score in snv\n";
+	print " --keep-gene             : keep gene information\n";
+	print " -v                      : verbose\n";
 	exit (1);
 }
 
 
 my ($inVcfFile, $outFile) = @ARGV;
 
+
+if ($countStrand ne '')
+{
+	Carp::croak "incorrect parameter for --count-strand: $countStrand\n" unless $countStrand eq '+' || $countStrand eq '-';
+}
 
 my %knownSiteHash;
 if ($knownSiteFile ne '')
@@ -56,6 +64,8 @@ if ($knownSiteFile ne '')
 	foreach my $s (@$snvs)
 	{
 		my $chromPos = $s->{"chrom"} . ":" . $s->{'position'};
+		$s->{'info'}{'strand'} = $countStrand if $countStrand ne ''; #override the strand to count
+
 		$knownSiteHash{$chromPos} = $s;
 		$s->{'iter'} = $i++;
 	}
@@ -81,6 +91,7 @@ my $header = join ("\t", "#chrom", "chromStart", "chromEnd", "name", "score", "s
 $header = join ("\t", $header, "geneId", "symbol", "region") if $keepGeneInfo;
 
 print $fout $header, "\n";
+
 
 while (my $line =<$fin>)
 {
@@ -137,8 +148,10 @@ while (my $line =<$fin>)
 		($refAntisense, $refSense, $altAntisense, $altSense) = ($refSense, $refAntisense, $altSense, $altAntisense);
 	}
 	
-	my $refSum = $refSense+$refAntisense;
-	my $altSum = $altSense+$altAntisense;
+	my $refSum = $countStrand ne '' ? $refSense : $refSense+$refAntisense;
+	my $altSum = $countStrand ne '' ? $altSense : $altSense+$altAntisense;
+	#note strand has already been flipped above
+
 	my $total = $refSum + $altSum;
 	my $score = $keepScore ? $snv->{'qual'} : $total;
 	

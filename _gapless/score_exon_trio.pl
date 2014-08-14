@@ -18,6 +18,12 @@ my $big = 0;
 
 my $cache = getDefaultCache ($prog);
 
+##
+#TODO: strictly speaking, we would like to separate strand for stranded libraries
+#however, since we focus on canonical exon junctions, we assume or reads aligned to proper junctions are should be counted, no matter which strand the read is sequenced
+
+
+
 
 GetOptions (
 		'c|cache:s'=>\$cache,

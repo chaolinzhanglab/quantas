@@ -21,7 +21,11 @@ my $uniq = 0;
 my $nsplit = 0;
 my $splitSize = 4000000; #4 million
 
-my $separateStrand = 0;
+#my $separateStrand = 0;
+my $libraryType = "unstranded"; 
+# or 'stranded-sa': read1 is sense and read2 is antisense
+# 'stranded-as' : read1 is antisense and read2 is sense
+
 my $isoformBedFile = "";
 my $cleanIsoform = 0;
 my $bigExonSize = 400;
@@ -45,7 +49,8 @@ GetOptions (
 	"big"=>\$big,
 	"use-pre-calc-score"=>\$usePreCalScore,
 	"use-pre-calc-size-dist:s"=>\$sizeDistFile,
-	"ss"=>\$separateStrand,
+	#"ss"=>\$separateStrand,
+	"library-type:s"=>\$libraryType,
 	"print-singleton"=>\$printSingleton,
 	"o|outp-dir:s"=>\$outputDir,
 	"keep-cache"=>\$keepCache,
@@ -60,21 +65,22 @@ if (@ARGV != 1 && @ARGV != 2)
 	print "Usage3: $prog [options] <read1.sam> <read2.sam>\n";
 	print "Usage4: $prog [options] <read1_and_2.sam>\n";
 	print " gzip compressed input files with .gz extension are allowed\n";
-	print " -sam                           : input files are in sam format\n";
-	print " -uniq                          : keep only unique mapping in sam2bed conversion\n";
-	print " --split-size [int]             : number of SE. reads in each split ($splitSize)\n";
-	print " -split    [int]                : number of splits (will override --split-size)\n";
-	print " -isoform [file]                : file name of splice isoform database\n";
-	print " --use-pre-calc-score           : use pre-calculated isoform prior score\n";
-	print " --clean-isoform                : clean isoforms (will supress --use-pre-calc-score\n";
-	print " -E        [int]                : big exon size (default=$bigExonSize)\n";
-	print " --use-pre-calc-size-dist [file]: use pre-calculated size distribution file\n";
-	print " -big                           : read number in each split is big (i.e. over ~3M pairs)\n";
-	print " --ss                           : separate the two strands\n";
-	print " --print-singleton              : print reads even when they are not found to be a legitimate pair\n";
-	print " -o        [dir]                : output dir (default=$outputDir)\n"; 
-	print " --keep-cache                   : keep cache files when the job is done\n";
-	print " -v                             : verbose\n";
+	print " -sam                             : input files are in sam format\n";
+	print " -uniq                            : keep only unique mapping in sam2bed conversion\n";
+	print " --split-size             [int]   : number of SE. reads in each split ($splitSize)\n";
+	print " -split                   [int]   : number of splits (will override --split-size)\n";
+	print " -isoform                 [file]  : file name of splice isoform database\n";
+	print " --use-pre-calc-score             : use pre-calculated isoform prior score\n";
+	print " --clean-isoform                  : clean isoforms (will supress --use-pre-calc-score\n";
+	print " -E                       [int]   : big exon size (default=$bigExonSize)\n";
+	print " --use-pre-calc-size-dist [file]  : use pre-calculated size distribution file\n";
+	print " -big                             : read number in each split is big (i.e. over ~3M pairs)\n";
+	print " --library-type           [string]: library  type ([unstranded]|stranded-as|stranded-sa)\n";
+	#print " --ss                             : separate the two strands\n";
+	print " --print-singleton                : print reads even when they are not found to be a legitimate pair\n";
+	print " -o                       [dir]   : output dir (default=$outputDir)\n"; 
+	print " --keep-cache                     : keep cache files when the job is done\n";
+	print " -v                               : verbose\n";
 	exit (1);
 }
 
@@ -97,7 +103,7 @@ print `date` if $verbose;
 
 my $verboseFlag = $verbose ? '-v' : '';
 my $bigFlag = $big ? "-big" : "";
-my $separateStrandFlag = $separateStrand ? "--ss" : '';
+#my $separateStrandFlag = $separateStrand ? "--ss" : '';
 
 system ("mkdir $outputDir") unless -d $outputDir;
 
@@ -120,7 +126,7 @@ if ($sam)
 }
 else
 {
-	($n1s, $n2s, $np) = prepareBedFiles ($read1InFile, $read2InFile, $read1PairedBedFile, $read2PairedBedFile, $read1SingletonBedFile, $read2SingletonBedFile);
+	($n1s, $n2s, $np) = prepareBedFiles ($read1InFile, $read2InFile, $read1PairedBedFile, $read2PairedBedFile, $read1SingletonBedFile, $read2SingletonBedFile, $tmpDir);
 }
 
 print "n1s=$n1s, n2s=$n2s, np=$np\n" if $verbose;
@@ -241,6 +247,7 @@ else
 		$ret = system ($cmd);
 		Carp::croak "Command [$cmd] crashed:$?\n" unless $ret == 0;
 
+		#library type not considered now, to be fixed
 		$cmd = "perl $cmdDir/score_exon_trio.pl $verboseFlag $bigFlag -c $tmpDir/score_junction_tmp_files $isoformBedFile $junctionReadBedFile $scoredIsoformBedFile";
 		print $cmd, "\n" if $verbose;
 		$ret = system ($cmd);
@@ -306,7 +313,7 @@ else
 
 		my $pairOnBigExonBedFile = "$tmpDir/pair.bigexon.bed";
 
-		$cmd = "perl $cmdDir/combine_paired_end.pl $verboseFlag $bigFlag $separateStrandFlag -cache $tmpDir/exon_size_tmp_files -gene $bigExonBedFile $genomicRead1BedFile $genomicRead2BedFile $pairOnBigExonBedFile";
+		$cmd = "perl $cmdDir/combine_paired_end.pl $verboseFlag $bigFlag --library-type $libraryType -cache $tmpDir/exon_size_tmp_files -gene $bigExonBedFile $genomicRead1BedFile $genomicRead2BedFile $pairOnBigExonBedFile";
 		print $cmd, "\n" if $verbose;
 		$ret = system ($cmd);
 		Carp::croak "Command [$cmd] crashed:$?\n" unless $ret == 0;
@@ -360,7 +367,7 @@ for (my $s = 0; $s < $nsplit; $s++)
 {
 	print "processing split $s ...\n" if $verbose;
 	my $pairBedFileTmp = "$splitDir/pair.gapless.bed.$s";
-	my $cmd = "perl $cmdDir/combine_paired_end.pl $verboseFlag $bigFlag $separateStrandFlag -cache $tmpDir/gapless_tmp_files -gene $scoredIsoformBedFile -use-prior -size-dist $sizeDistFile $printSingletonFlag $splitRead1BedStem.$s $splitRead2BedStem.$s $pairBedFileTmp";
+	my $cmd = "perl $cmdDir/combine_paired_end.pl $verboseFlag $bigFlag --library-type $libraryType -cache $tmpDir/gapless_tmp_files -gene $scoredIsoformBedFile -use-prior -size-dist $sizeDistFile $printSingletonFlag $splitRead1BedStem.$s $splitRead2BedStem.$s $pairBedFileTmp";
 	print $cmd, "\n" if $verbose;
 	my $ret = system ($cmd);
 	Carp::croak "Command [$cmd] crashed:$?\n" unless $ret == 0;
@@ -527,7 +534,7 @@ sub prepareSamFiles
 
 sub prepareBedFiles
 {
-	my ($read1BedFile, $read2BedFile, $read1PairedBedFile, $read2PairedBedFile, $read1SingletonBedFile, $read2SingletonBedFile) = @_;
+	my ($read1BedFile, $read2BedFile, $read1PairedBedFile, $read2PairedBedFile, $read1SingletonBedFile, $read2SingletonBedFile, $cache) = @_;
 	
 	print "sort the original input files ...\n" if $verbose;
 
@@ -538,15 +545,15 @@ sub prepareBedFiles
 	if (-f $read2BedFile)
 	{
 		#read1 and read2 are provided in separate files
-		my $cmd = "grep -v \"^track\" $read1BedFile | awk '{print \$4\"\\tr1\\t\"\$0}' | sort -k 1b,1 > $sortedRead1BedFile";
-		$cmd = "gunzip -c $read1BedFile | grep -v \"^track\" | awk '{print \$4\"\\tr1\\t\"\$0}' | sort -k 1b,1 > $sortedRead1BedFile" if $read1BedFile=~/\.gz$/;
+		my $cmd = "grep -v \"^track\" $read1BedFile | awk '{print \$4\"\\tr1\\t\"\$0}' | sort -T $cache -k 1b,1 > $sortedRead1BedFile";
+		$cmd = "gunzip -c $read1BedFile | grep -v \"^track\" | awk '{print \$4\"\\tr1\\t\"\$0}' | sort -T $cache -k 1b,1 > $sortedRead1BedFile" if $read1BedFile=~/\.gz$/;
 
 		print $cmd, "\n" if $verbose;
 		my $ret = system ($cmd);
 		Carp::croak "CMD=$cmd failed: $?\n" if $ret != 0;
 
-		$cmd =    "grep -v \"^track\" $read2BedFile | awk '{print \$4\"\\tr2\\t\"\$0}' | sort -k 1b,1 > $sortedRead2BedFile";
-		$cmd = "gunzip -c $read2BedFile | grep -v \"^track\" | awk '{print \$4\"\\tr2\\t\"\$0}' | sort -k 1b,1 > $sortedRead2BedFile" if $read2BedFile=~/\.gz$/;		
+		$cmd =    "grep -v \"^track\" $read2BedFile | awk '{print \$4\"\\tr2\\t\"\$0}' | sort -T $cache -k 1b,1 > $sortedRead2BedFile";
+		$cmd = "gunzip -c $read2BedFile | grep -v \"^track\" | awk '{print \$4\"\\tr2\\t\"\$0}' | sort -T $cache -k 1b,1 > $sortedRead2BedFile" if $read2BedFile=~/\.gz$/;		
 
 		print $cmd, "\n" if $verbose;
 		$ret = system ($cmd);
@@ -555,16 +562,16 @@ sub prepareBedFiles
 	else
 	{
 		#read1 and 2 are provided in the same file and distinguished by /1 and /2
-		my $cmd = "grep -v \"^track\" $read1BedFile | grep -P \"\\/1\\t\" | sed 's/\\/1\\t/\\t/g' | awk '{print \$4\"\\tr1\\t\"\$0}'| sort -k 1b,1 > $sortedRead1BedFile";
-		$cmd = "gunzip -c $read1BedFile | grep -v \"^track\" | grep -P \"\\/1\\t\" | sed 's/\\/1\\t/\\t/g' | awk '{print \$4\"\\tr1\\t\"\$0}'| sort -k 1b,1 > $sortedRead1BedFile"
+		my $cmd = "grep -v \"^track\" $read1BedFile | grep -P \"\\/1\\t\" | sed 's/\\/1\\t/\\t/g' | awk '{print \$4\"\\tr1\\t\"\$0}'| sort -T $cache -k 1b,1 > $sortedRead1BedFile";
+		$cmd = "gunzip -c $read1BedFile | grep -v \"^track\" | grep -P \"\\/1\\t\" | sed 's/\\/1\\t/\\t/g' | awk '{print \$4\"\\tr1\\t\"\$0}'| sort -T $cache -k 1b,1 > $sortedRead1BedFile"
 		if $read1BedFile=~/\.gz$/;
 		
 		print $cmd, "\n" if $verbose;
 		my $ret = system ($cmd);
 		Carp::croak "CMD=$cmd failed: $?\n" if $ret != 0;
 	
-		$cmd =    "grep -v \"^track\" $read1BedFile | grep -P \"\\/2\\t\" | sed 's/\\/2\\t/\\t/g' | awk '{print \$4\"\\tr2\\t\"\$0}'| sort -k 1b,1 > $sortedRead2BedFile";
-		$cmd = "gunzip -c $read1BedFile | grep -v \"^track\" | grep -P \"\\/2\\t\" | sed 's/\\/2\\t/\\t/g' | awk '{print \$4\"\\tr2\\t\"\$0}'| sort -k 1b,1 > $sortedRead2BedFile"
+		$cmd =    "grep -v \"^track\" $read1BedFile | grep -P \"\\/2\\t\" | sed 's/\\/2\\t/\\t/g' | awk '{print \$4\"\\tr2\\t\"\$0}'| sort -T $cache -k 1b,1 > $sortedRead2BedFile";
+		$cmd = "gunzip -c $read1BedFile | grep -v \"^track\" | grep -P \"\\/2\\t\" | sed 's/\\/2\\t/\\t/g' | awk '{print \$4\"\\tr2\\t\"\$0}'| sort -T $cache -k 1b,1 > $sortedRead2BedFile"
 		if $read1BedFile=~/\.gz$/;
 
 		print $cmd, "\n" if $verbose;

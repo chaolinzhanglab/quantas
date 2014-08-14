@@ -24,6 +24,7 @@ my $readLen = 101;
 my $minDepth = 1;
 my $minAltBase = 1;
 
+my $antisense = 0; #this is a straned library and the read is on the antisense strand
 my $knownSiteFile = "";
 my $useKnownAltBase = 0;
 
@@ -48,6 +49,7 @@ GetOptions (
 	"a:i"=>\$minAltBase,
 	"m"=>\$mpileup,
 	"c:s"=>\$cache,
+	"antisense"=>\$antisense,
 	"keep-cache"=>\$keepCache,
 	"v"=>\$verbose);
 
@@ -67,6 +69,7 @@ if (@ARGV < 1 && $bamListFile eq '')
 	print " -Q [int]    : skip bases with baseQ/BAQ smaller than INT ($baseQ)\n";
 	print " -d [int]    : minimum depth to report a potential SNV ($minDepth)\n";
 	print " -a [int]    : minimum alt base to report a potential SNV ($minAltBase)\n";
+	print " --antisense : the read is on the antisense strand (read count will be reversed))\n";
 	print " -c          : cache dir ($cache)\n";
 	print " --keep-cache: keep cache\n";
 	#print " -m         : the input is the mpileup file (for debug only)\n";
@@ -331,6 +334,8 @@ while (my $line = <$fin>)
 	}
 
 	my $DP4=join (",", $readBaseHash{'+'}->{$refBase}, $readBaseHash{'-'}->{$refBase}, $readBaseHash{'+'}->{$altBase}, $readBaseHash{'-'}->{$altBase});
+	$DP4 = join (",", $readBaseHash{'-'}->{$refBase}, $readBaseHash{'+'}->{$refBase}, $readBaseHash{'-'}->{$altBase}, $readBaseHash{'+'}->{$altBase}) if $antisense;
+
 	if (-f $knownSiteFile)
 	{
 		#this is the temp output file

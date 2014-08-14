@@ -8,6 +8,7 @@ use Carp;
 use Data::Dumper;
 
 use Scalar::Util qw(looks_like_number);
+use Statistics::Basic qw(:all);
 
 use MyConfig;
 
@@ -275,8 +276,10 @@ if ($printRPKM)
 
 	my %RPKMMeans;
 
+	my %RPKMFilter; #whether the max of the groups is above the median
 	foreach my $gene (keys %RPKMs)
 	{
+		$RPKMFilter{$gene} = 0; #note that we assume RPKM cannot be negative
 		foreach my $group (@groupNames)
 		{
 			my $sum = 0;
@@ -286,6 +289,7 @@ if ($printRPKM)
 			{
 				if (exists($RPKMs{$gene}{$sample}))
 				{
+					Carp::croak "negative RPKM, gene=$gene, sample=$sample, RPKM=", $RPKMs{$gene}{$sample}, "\n" if $RPKMs{$gene}{$sample} < 0;
 					$sum += $RPKMs{$gene}{$sample};
 				}
 				else
@@ -295,8 +299,13 @@ if ($printRPKM)
 			}
 			
 			$RPKMMeans{$gene}{$group} = $sum / (scalar @$samples);
+			$RPKMFilter{$gene} = $RPKMMeans{$gene}{$group} if $RPKMFilter{$gene} < $RPKMMeans{$gene}{$group};
 		}
 	}
+
+	my $med = median (values %RPKMFilter);
+	map {$RPKMFilter{$_} = $RPKMFilter{$_} > $med ? 1 : 0} keys %RPKMFilter;	
+
 
 	open (INFILE, $outFile) || Carp::croak "cannot open $outFile to read\n";
 	open (OUTFILE, ">$outFileRPKM") || Carp::croak "cannot open $outFileRPKM to write";
@@ -316,6 +325,7 @@ if ($printRPKM)
 			{
 				print OUTFILE "\tRPKM($group)";
 			}
+			print OUTFILE "\tRPKMFilter";
 		}
 		else
 		{
@@ -326,6 +336,7 @@ if ($printRPKM)
 			{
 				print OUTFILE "\t$RPKMMeans{$gene}{$group}";
 			}
+			print OUTFILE "\t", $RPKMFilter{$gene};
 		}
 
 		print OUTFILE "\n";

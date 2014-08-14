@@ -181,6 +181,7 @@ sub readExprDataFile
 		my $tagNum = $data[$i][0];
 		
 		$tagNum = 1 if $tagNum == 0;
+		
 		$data[$i][1] = $tagNum * 1e9 / $exonLen / $totalTagNum;
 	}
 

@@ -15,6 +15,7 @@ my $prog = basename ($0);
 my $vcfListFile = "";
 my $minAltBase = 0;
 my $minDepth = 0;
+my $minMaf = 0;
 my $fixAltBase = 0;
 
 my $verbose = 0;
@@ -23,18 +24,20 @@ GetOptions (
 	"l:s"=>\$vcfListFile,
 	"d:i"=>\$minDepth,
 	"a:i"=>\$minAltBase,
+	"r:f"=>\$minMaf,
 	"x"=>\$fixAltBase,
 	"v"=>\$verbose);
 
 if (@ARGV < 1 && $vcfListFile eq '')
 {
-	print "extract SNVs from RNASeq bam files\n";
+	print "combine read count from multiple vcf files\n";
 	print "Usage: $prog [options] <in1.vcf> [in2.vcf]\n";
-	print "Note: in DP4, counts of REF is not accurate due to missing info in some samples\n";
+	print "Note: in DP4, counts of REF might (or not) be accurate due to missing info in some samples\n";
 	print " [options\n";
 	print " -l [int]   : list of vcf files\n";
 	print " -d [int]   : minimum depth ($minDepth)\n";
 	print " -a [int]   : minimum alt base to report a potential SNV ($minAltBase)\n";
+	print " -r [float] : minimum minor allele frequency ($minMaf)\n";
 	print " -x         : do not reassign altBase\n";
 	print " -v         : verbose\n";
 	exit (1);
@@ -145,7 +148,11 @@ foreach my $chrom (sort keys %snvHash)
 		
 		my $altBaseSum = $readBaseHash{$altBase};
 		my $total = $readBaseHash{$refBase} + $altBaseSum;
-		next unless $altBaseSum >= $minAltBase && $total >= $minDepth;
+
+		my $maf = $total >0 ? $altBaseSum / $total : 0;
+		$maf = 1 - $maf if $maf > 0.5;
+		
+		next unless $altBaseSum >= $minAltBase && $total >= $minDepth && $maf > $minMaf;
 		
 		my $DP4 = join(",", $snv->{'+'}->{$refBase}, $snv->{'-'}->{$refBase}, $snv->{'+'}->{$altBase}, $snv->{'-'}->{$altBase});
 		

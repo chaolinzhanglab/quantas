@@ -109,6 +109,11 @@ Carp::croak "no AS type chosen\n" if (keys %analyses) == 0;
 
 
 my ($inBedFile, $outDir) = @ARGV;
+$inBedFile = quotemeta($inBedFile);
+print "$inBedFile\n" if $verbose;
+$outDir = quotemeta($outDir);
+print "$outDir\n" if $verbose;
+
 
 my $outFile = "";
 $outFile = $outDir if $combineOutput;
@@ -155,7 +160,7 @@ foreach my $asType (sort {$analyses{$a} <=> $analyses{$b}} keys %analyses)
 
 	my $typeCache = "$cache/cache_$asType";
 
-	my $cmd = "perl $cmdDir/summarize_splicing.pl -type $asType $bigFlag $verboseFlag $keepCacheFlag -c $typeCache $ssFlag $weightFlag $weightAvgFlag $asBedFile $inBedFile $tmpOutFile";
+	my $cmd = "perl $cmdDir/summarize_splicing.pl -type $asType $bigFlag $verboseFlag $keepCacheFlag -c $typeCache $ssFlag $weightFlag $weightAvgFlag $asBedFile \"$inBedFile\" $tmpOutFile";
 	print "$cmd\n" if $verbose;
 	my $ret = system ($cmd);
 	print "CMD $cmd failed: $?\n" if $ret != 0;

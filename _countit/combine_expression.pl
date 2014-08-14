@@ -19,7 +19,7 @@ GetOptions (
 
 if (@ARGV < 3)
 {
-	print "generate expression matrix\n";
+	print "combine gene expression summary from technical replicates\n";
 	print "Usage $prog [options] <in1.expr.txt> <in2.expr.txt> [...] <out.expr.txt>\n";
 	print " -v                     : verbose\n";
 	exit (1);
@@ -102,7 +102,10 @@ print $fout join ("\t", "#gene_id", "gene_symbol", "tag_num", "exon_len", "RPKM"
 
 for (my $i = 0; $i < $n; $i++)
 {
-	print $fout join ("\t", @{$geneInfo->[$i]}, @{$groupData[$i]}), "\n";
+	my ($geneId, $symbol, $exonLen) = @{$geneInfo->[$i]};
+	my ($tagNum, $RPKM) = @{$groupData[$i]};
+
+	print $fout join ("\t", $geneId, $symbol, $tagNum, $exonLen, $RPKM), "\n";
 }
 
 close ($fout);

@@ -18,6 +18,8 @@ my $outExonFile = "";
 my $outIntronFile = "";
 my $internal = 0;
 my $terminal = 0;
+my $terminal3 = 0;
+my $terminal5 = 0;
 my $completeCodonOnly = 0;
 my $noExonIntronId = 0;
 my $verbose = 0;
@@ -40,6 +42,8 @@ GetOptions ('l|left:i'=>\$leftExt,
 		'oe:s'=>\$outExonFile,
 		'internal'=>\$internal,
 		'terminal'=>\$terminal,
+		'terminal3' =>\$terminal3,
+		'terminal5' =>\$terminal5,
 		'cc'=>\$completeCodonOnly,
 		'nid'=>\$noExonIntronId,
 		'keep-lncrna'=>\$keepLncRNA,
@@ -58,6 +62,8 @@ if (@ARGV != 1)
 	print " -partial               : tolerate partial coding when filtering (off)\n";
 	print " -internal              : only internal exons (off)\n";
 	print " -terminal              : only terminal exons (off)\n";
+	print " -terminal3             : only the 3' terminal exon (off)\n";
+	print " -terminal5             : only the 5' terminal exon (off)\n";
 	print " -l        [int]        : extention on the left ($leftExt)\n";
 	print " -r        [int]        : extention on the right ($rightExt)\n";
 	print " -cc                    : complete codon only (effective only when filtering with coding) (off)\n";
@@ -71,7 +77,7 @@ if (@ARGV != 1)
 	exit (0);
 }
 
-Carp::croak "internal and terminal can not be specified at the same time\n" if $internal && $terminal;
+Carp::croak "internal and terminal can not be specified at the same time\n" if $internal + $terminal + $terminal3 + $terminal5 > 1;
 
 Carp::croak "output nothing?\n" if ($outExonFile eq '' && $outIntronFile eq '');
 
@@ -234,6 +240,14 @@ while (my $line = <$fin>)
 			if ($terminal)
 			{
 				next unless ($i == 0 || $i == $blockNum - 1);
+			}
+			elsif ($terminal3)
+			{
+				next unless $j == $blockNum - 1;
+			}
+			elsif ($terminal5)
+			{
+				next unless $j == 0;
 			}
 
 			if ($tolPartialCoding)#tolerate partial coding exon

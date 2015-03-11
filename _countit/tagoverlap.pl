@@ -25,6 +25,8 @@ my $cache = getDefaultCache ($prog);
 my $delimitor = "//";
 my $keepScore = 0;
 my $keepCache = 0;
+my $keepTagName = 0;
+my $nonRedundant = 0;
 
 my $reverse = 0; #find nonoverlapping tags
 my $big = 0;
@@ -38,11 +40,13 @@ GetOptions (
 		'ss|sep-strand'=>\$separateStrand,
 		'denom:s'=>\$denominator,
 		'complete-overlap'=>\$completeOverlap,
+		'non-redundant'=>\$nonRedundant,
 		'r'=>\$reverse,
 		'd:s'=>\$delimitor,
 		'big'=>\$big,
 		'minBlockSize:i'=>\$minBlockSize,
 		'keep-score'=>\$keepScore,
+		'keep-tag-name'=>\$keepTagName,
 		'c|cache:s'=>\$cache,
 		'keep-cache'=>\$keepCache,
 		'v|verbose'=>\$verbose);
@@ -51,6 +55,7 @@ if (@ARGV != 2)
 {
 	print "Find tags overlap with particular regions\n";
 	print "Usage1: $prog [options] <tags.bed> <overlap.out>\n";
+	print " <tags.bed> : gz files accepted. use - for stdin\n";
 	print "Usage2: $prog [options] <tags_dir_by_chrom> <overlap.out>\n";
 	print "OPTIONS:\n";
 	print " -big              : either region or tag file is big\n";
@@ -60,8 +65,10 @@ if (@ARGV != 2)
 	print " -ss               : separate strand (off)\n";
 	print " --denom   [string]: denominator to calculate overlap fraction ([tag]|region)\n";
 	print " --complete-overlap: requires complete overlap of the tag with the region\n";
+	print " --non-redundant   : remove duplicate tags in output\n";
 	print " -r                : reverse mode to print tags without ovrlap with the region (off)\n";
 	print " -d        [string]: delimitor to separate ids\n";
+	print " --keep-tag-name   : keep tag name\n";
 	print " --keep-score      : keep tag score\n";
 	print " -c        [string]: cache dir ($cache)\n";
 	print " --keep-cache      : keep cache when the job is done\n";
@@ -71,11 +78,13 @@ if (@ARGV != 2)
 
 my ($tagBedFile, $outFile) = @ARGV;
 
+print "non-redundant = $nonRedundant\n" if $verbose;
 print "keep-score = $keepScore\n" if $verbose;
+print "keep-tag-name = $keepTagName\n" if $verbose;
 print "loading tags from $tagBedFile ...\n" if $verbose;
 my %tagCount;
 
-if (-f $tagBedFile)
+if (-f $tagBedFile || $tagBedFile eq '-')
 {
 	if ($big)
 	{
@@ -341,6 +350,8 @@ sub findOverlapTags
 	
 	my $firstTagIdx = 0; #the first tag that overlap with or on the right of the current window
 
+	my %usedTags;
+
 	foreach my $r (@$regions)
 	{
 		
@@ -380,20 +391,30 @@ sub findOverlapTags
 					if ($reverse == 0)
 					{
 						my %t = %{$tags->[$i]};
-						$t{"name"} .= $delimitor . $r->{"name"};
+						my $tagID = $t{"chrom"} . "." . $t{"chromStart"} . "." . $t{"chromEnd"} . $t{"strand"} . $t{"name"};
+
+						$t{"name"} .= $delimitor . $r->{"name"} unless $keepTagName;
 						my $start = max($chromStart, $tags->[$i]->{"chromStart"});
 						my $end = min ($chromEnd, $tags->[$i]->{"chromEnd"});
 	
 						my $score = calcOverlapScore ($tags->[$i], $r, $denominator);
 						$t{"score"} = $score unless $keepScore;
 						
-						if ($completeOverlap)
+						if ($nonRedundant == 0 || !exists($usedTags{$tagID}))
 						{
-							print $fout bedToLine (\%t), "\n" if $score >= 1 - 1e-10;
-						}
-						else
-						{
-							print $fout bedToLine (\%t), "\n";
+							if ($completeOverlap)
+							{
+								if ($score >= 1 - 1e-10)
+								{
+									print $fout bedToLine (\%t), "\n";
+									$usedTags{$tagID} = 1;
+								}
+							}
+							else
+							{
+								print $fout bedToLine (\%t), "\n";
+								$usedTags{$tagID} = 1;
+							}
 						}
 					}
 				}

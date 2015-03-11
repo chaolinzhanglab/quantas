@@ -7,6 +7,7 @@ use File::Basename;
 use Carp;
 use Data::Dumper;
 
+use Quantas;
 
 my $prog = basename ($0);
 my $verbose = 0;
@@ -56,7 +57,7 @@ if ($base ne '')
 
 print "loading configuration file from $configFile ...\n" if $verbose;
 Carp::croak "contig file $configFile does not exist\n" unless -f $configFile;
-my $groups = readConfigFile ($configFile, $base);
+my $groups = readConfigFile ($configFile, $base, $type);
 
 print "done.\n" if $verbose;
 
@@ -254,93 +255,5 @@ for (my $i = 0; $i < $nAS; $i++)
 close ($fout);
 
 
-
-
-sub readConfigFile
-{
-	my ($configFile, $base) = @_;
-	my $fin;
-	open ($fin, "<$configFile") || Carp::croak "cannot open file $configFile to read\n";
-	my $i = 0;
-	my %groups;
-
-	while (my $line = <$fin>)
-	{
-		chomp $line;
-		next if $line=~/^\s*$/;
-		next if $line=~/^\#/;
-		my ($sampleName, $groupName) = split (/\t/, $line);
-		$groups{$groupName}->{"id"} = $i++ unless exists $groups{$groupName};
-		push @{$groups{$groupName}->{"samples"}}, $sampleName;
-
-		my $inputFile = $base ne '' ? "$base/$sampleName" : $sampleName;
-		if (-d $inputFile)
-		{
-			$inputFile = "$inputFile/$type.count.txt";
-		}
-
-		Carp::croak "Input file $inputFile does not exist\n" unless -f $inputFile;
-	}
-	close ($fin);
-	return \%groups;
-}
-
-sub readASDataFile
-{
-    my ($inputFile, $type) = @_;
-
-    my $fin;
-    my @data;
-    my @ASInfo;
-    open ($fin, "<$inputFile") || Carp::croak "cannot open file $inputFile to read\n";
-    while (my $line = <$fin>)
-    {
-        chomp $line;
-        next if $line =~/^\s*$/;
-        next if $line =~/^\#/;
-
-        my @cols = split (/\t/, $line);
-        my (@infoCols, @dataCols);
-
-        if ($type eq 'cass' || $type eq 'iret' || $type eq 'mutx' || $type eq 'taca')
-        {
-            @infoCols = @cols[0..7];
-            @dataCols = @cols[8..$#cols];
-			pop @dataCols if @dataCols > 5 && $type eq 'taca';
-            #to exclude the last column of taca in the new format
-            #04/17/2014
-        }
-        elsif ($type eq 'alt3' || $type eq 'alt5')
-        {
-            @infoCols = @cols[0..7];
-            push @infoCols, $cols[10];
-            @dataCols = @cols[8..9];
-            push @dataCols, @cols[11..$#cols];
-        }
-		elsif ($type eq 'apa' || $type eq 'snv')
-        {
-            #polyA seq data
-            @infoCols = @cols[0..7];
-            push @infoCols, @cols[10..$#cols];
-            @dataCols = @cols[8..9];
-        }
-		elsif ($type eq 'snv2ss')
-		{
-			@infoCols = @cols[0..7];
-			push @infoCols, @cols[10..12];
-			@dataCols = @cols[8..9];
-		}
-        else
-        {
-            Carp::croak "incorrect AS type: $type\n";
-        }
-
-        push @ASInfo, \@infoCols;
-        push @data, \@dataCols;
-    }
-    close ($fin);
-
-    return {ASInfo=>\@ASInfo, data=>\@data};
-}
 
 

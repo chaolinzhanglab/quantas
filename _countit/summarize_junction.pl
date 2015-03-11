@@ -17,6 +17,7 @@ my $cmdDir = dirname ($0);
 
 my $verbose = 0;
 my $weight = 0;
+my $mean = 0;
 my $big = 0;
 my $separateStrand = 0;
 
@@ -26,6 +27,7 @@ my $keepCache = 0;
 GetOptions (
 		'big'=>\$big,
 		'weight'=>\$weight,
+		'mean'=>\$mean,
 		'ss'=>\$separateStrand,
 		'c|cache:s'=>\$cache,
 		'keep-cache'=>\$keepCache,
@@ -40,6 +42,7 @@ if (@ARGV != 3)
 	print "OPTIONS:\n";
 	#print " -big           : the tag file is big\n";
 	print " -weight        : weight tags according to score\n";
+	print " -mean          : calculate the mean score for each junction\n";
 	print " --ss           : consider the two strands separately\n";
 	print " -c             : cache dir ($cache)\n";
 	#print " --keep-cache   : keep cache files\n";
@@ -53,7 +56,7 @@ my ($intronBedFile, $tagBedFile, $outBedFile) = @ARGV;
 my $bigFlag = $big ? '-big' : '';
 my $verboseFlag = $verbose ? '-v' : '';
 my $ssFlag = $separateStrand ? '--ss' : '';
-
+$weight = 1 if $mean;
 
 my %intronHash;
 
@@ -70,10 +73,15 @@ foreach my $i (@$introns)
 
 	my $intronKey = "$chrom:$chromStart:$chromEnd";
 	$intronKey .= ":$strand" if $separateStrand;
-	$i->{'iter'} = $iter++;
-	$i->{'score'} = 0;
-	$intronHash{$intronKey} = $i;	
+	#$i->{'iter'} = $iter++;
+	#$i->{'score'} = 0;
+	#$i->{'n'} = 0;
+
+	#in case there are redundancy of introns
+	$iter++;
+	$intronHash{$intronKey} = {score=>0, n=>0};	
 }
+
 
 print "$iter introns loaded\n" if $verbose;
 
@@ -119,6 +127,7 @@ while (my $line = <$fin>)
 		
 		my $score = $weight ? $t->{'score'} : 1;
 		$intronHash{$key}{'score'} += $score;
+		$intronHash{$key}{'n'} += 1;
 	}
 }
 
@@ -128,8 +137,20 @@ print "dumping output ...\n" if $verbose;
 
 my $fout;
 open ($fout, ">$outBedFile") || Carp::croak "cannot open file $outBedFile to write\n";
-foreach my $i (sort {$a->{'iter'} <=> $b->{'iter'}} values %intronHash)
+
+foreach my $i (@$introns)
 {
+	my $chrom = $i->{'chrom'};
+	my $chromStart = $i->{'chromStart'};
+	my $chromEnd = $i->{'chromEnd'};
+	my $strand = $i->{'strand'};
+
+	my $intronKey = "$chrom:$chromStart:$chromEnd";
+	$intronKey .= ":$strand" if $separateStrand;
+	my $i2 = $intronHash{$intronKey};
+	$i->{'score'} = $i2->{'score'};
+	$i->{'score'} /= $i2->{'n'} if $mean && $i2->{'n'} > 0;
+
 	print $fout bedToLine ($i), "\n";
 }
 close ($fout);

@@ -18,7 +18,7 @@ my $prog = basename($0);
 
 my $bigFile = 0;	#if yes, we need to use cache
 my $separateStrand = 0;
-my $weight = 0;	#the way to calculate the score in each cluster, without weight means the number of tags, other wise, the sum of scores
+my $weight = 0;	#the way to calculate the score for each junction, without weight means the number of tags, other wise, the sum of scores
 my $genomeDir = "";
 my $organism = "mm9";
 my $verbose = 0;

@@ -118,7 +118,7 @@ system ("mkdir $cache");
 print "get count of tags on each core exon\n" if $verbose;
 my $exonTagCountBedFile = "$cache/exon.tag.count.bed";
 my $ssFlag = $separateStrand ? '--ss' : '';
-my $cmd = "perl $cmdDir/tag2profile.pl $bigFlag $ssFlag $weightFlag $verboseFlag -region $exonBedFile -of bed  $inBedFile $exonTagCountBedFile";
+my $cmd = "perl $cmdDir/tag2profile.pl $bigFlag $ssFlag $weightFlag $verboseFlag -c $cache/tmp_count -region $exonBedFile -of bed  $inBedFile $exonTagCountBedFile";
 print "$cmd\n" if $verbose;
 my $ret = system ($cmd);
 Carp::croak "CMD $cmd failed: $?\n" if $ret != 0;

@@ -6,11 +6,12 @@ use File::Basename;
 
 use Carp;
 use Data::Dumper;
-
+use Quantas;
 
 my $prog = basename ($0);
 my $verbose = 0;
 my $log2 = 0;
+my $count = 0;
 
 my $base = "";
 #my $method = "mean";  #sum
@@ -18,6 +19,7 @@ my $base = "";
 GetOptions (
 	"base:s"=>\$base,
 	"log2"=>\$log2,
+	"raw-count"=>\$count,
 	"v|verbose"=>\$verbose
 );
 
@@ -27,6 +29,7 @@ if (@ARGV != 2)
 	print "Usage $prog [options] <in.conf> <out.txt>\n";
 	print " -base         [string] : base dir of input data\n";
 	print " -log2                  : report log2 transformed RPKM\n";
+	print " --raw-count            : report the raw read count (will suppress -log2)\n";
 	print " -v                     : verbose\n";
 	exit (1);
 }
@@ -115,8 +118,16 @@ for (my $i = 0; $i < $n; $i++)
 		my $gName = $groupNames[$g];
 		my $d = $groupData[$g][$i];
 		my $samples = $groups->{$gName}->{"samples"};
-		my $k = @$samples;	
-		$out[$g] = $log2 ? log ($d->[1]/$k) / log(2) : $d->[1]/$k;
+		my $k = @$samples;
+		if ($count)
+		{
+			#raw read count
+			$out[$g] = $d->[0]; 
+		}
+		else
+		{
+			$out[$g] = $log2 ? log ($d->[1]/$k) / log(2) : $d->[1]/$k;
+		}
 	}
 
 	print $fout join ("\t", @{$geneInfo->[$i]}, @out), "\n";
@@ -125,67 +136,5 @@ for (my $i = 0; $i < $n; $i++)
 
 close ($fout);
 
-
-
-
-sub readConfigFile
-{
-	my ($configFile, $base) = @_;
-	my $fin;
-	open ($fin, "<$configFile") || Carp::croak "cannot open file $configFile to read\n";
-	my $i = 0;
-	my %groups;
-
-	while (my $line = <$fin>)
-	{
-		chomp $line;
-		next if $line=~/^\s*$/;
-		next if $line=~/^\#/;
-		my ($sampleName, $groupName) = split (/\t/, $line);
-		$groups{$groupName}->{"id"} = $i++ unless exists $groups{$groupName};
-		push @{$groups{$groupName}->{"samples"}}, $sampleName;
-	}
-	close ($fin);
-	return \%groups;
-}
-
-sub readExprDataFile
-{
-	my ($inputFile) = @_;
-	
-	my $fin;
-	my @data;
-	my @geneInfo;
-	open ($fin, "<$inputFile") || Carp::croak "cannot open file $inputFile to read\n";
-	
-	my $totalTagNum = 0;
-	while (my $line = <$fin>)
-	{
-		chomp $line;
-		next if $line =~/^\s*$/;
-		next if $line =~/^\#/;
-		
-		my ($geneId, $symbol, $tagNum, $exonLen, $RPKM) = split (/\t/, $line);
-		
-		push @geneInfo, [$geneId, $symbol, $exonLen];
-		push @data, [$tagNum,$RPKM];
-		
-		$totalTagNum += $tagNum;
-	}
-	close ($fin);
-
-	#recalculate RPKM by adding pseudo count
-	for (my $i = 0; $i < @geneInfo; $i++)
-	{
-		my $exonLen = $geneInfo[$i][2];
-		my $tagNum = $data[$i][0];
-		
-		$tagNum = 1 if $tagNum == 0;
-		
-		$data[$i][1] = $tagNum * 1e9 / $exonLen / $totalTagNum;
-	}
-
-	return {geneInfo=>\@geneInfo, data=>\@data};
-}
 
 

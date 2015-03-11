@@ -921,7 +921,7 @@ sub getExactProfile
 	if (@profile > 0)
 	{
 		my $lastNode = $#profile;
-		Carp::croak "tag count is not zero at last node:", Dumper (\@profile), "\n" if Common::ABS ($profile[$lastNode][1]) > 1e-6;
+		Carp::croak "tag count is not zero at last node:", Dumper (\@profile), "\n" if Common::ABS ($profile[$lastNode][1]) > 1e-4;
 	}
 	return \@profile;
 }

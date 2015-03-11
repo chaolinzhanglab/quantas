@@ -96,7 +96,7 @@ foreach my $gName (@groupNames)
 		my $inputFile = $base ne '' ? "$base/$s" : $s;
 
 		my $sdata = readJunctionDataFile ($inputFile);
-		$junctionInfo = $sdata->{"junctionInfo"};
+		$junctionInfo = $sdata->{"info"};
 		if ($nJunction != 0)
 		{
 			Carp::croak "data inconsistency detected\n" if @$junctionInfo != $nJunction;
@@ -130,12 +130,7 @@ for (my $g = 0; $g < @groupNames; $g++)
 		for (my $i = 0; $i < $nJunction; $i++)
 		{
 			my $d = $data->[$i];
-
-			my $nsamples = @$d;
-			for (my $j = 0; $j < @$d; $j++)
-            {
-                $groupData[$g][$i][$j] += $d->[$j];
-            }
+			$groupData[$g][$i] += $d;
 		}
 	}
 }
@@ -162,7 +157,7 @@ for (my $i = 0; $i < $nJunction; $i++)
 	{
 		my $d = $groupData[$g][$i];
 
-		$out[$g] = $d->[0];
+		$out[$g] = $d;
 	}
 
 	my $gene2symbol = exists $id2gene2symbolHash{$junctionInfo->[$i][3]} ? $id2gene2symbolHash{$junctionInfo->[$i][3]} : "NA//NA";
@@ -180,60 +175,5 @@ for (my $i = 0; $i < $nJunction; $i++)
 
 close ($fout);
 
-
-
-
-sub readConfigFile
-{
-	my ($configFile, $base) = @_;
-	my $fin;
-	open ($fin, "<$configFile") || Carp::croak "cannot open file $configFile to read\n";
-	my $i = 0;
-	my %groups;
-
-	while (my $line = <$fin>)
-	{
-		chomp $line;
-		next if $line=~/^\s*$/;
-		next if $line=~/^\#/;
-		my ($sampleName, $groupName) = split (/\t/, $line);
-		$groups{$groupName}->{"id"} = $i++ unless exists $groups{$groupName};
-		push @{$groups{$groupName}->{"samples"}}, $sampleName;
-
-		my $inputFile = $base ne '' ? "$base/$sampleName" : $sampleName;
-
-		Carp::croak "Input file $inputFile does not exist\n" unless -f $inputFile;
-	}
-	close ($fin);
-	return \%groups;
-}
-
-sub readJunctionDataFile
-{
-    my ($inputFile) = @_;
-
-    my $fin;
-    my @data;
-    my @junctionInfo;
-    open ($fin, "<$inputFile") || Carp::croak "cannot open file $inputFile to read\n";
-    while (my $line = <$fin>)
-    {
-        chomp $line;
-        next if $line =~/^\s*$/;
-        next if $line =~/^\#/;
-
-        my @cols = split (/\t/, $line);
-        my (@infoCols, @dataCols);
-
-        @infoCols = @cols[0..5];
-        $dataCols[0] = $cols[4];
-		
-        push @junctionInfo, \@infoCols;
-        push @data, \@dataCols;
-    }
-    close ($fin);
-
-    return {junctionInfo=>\@junctionInfo, data=>\@data};
-}
 
 

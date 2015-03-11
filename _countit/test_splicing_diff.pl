@@ -10,6 +10,7 @@ use Carp;
 use Data::Dumper;
 
 use Common;
+use Quantas;
 use MyConfig;
 
 my $prog = basename ($0);
@@ -47,7 +48,7 @@ if (@ARGV != 2)
 	print "Usage $prog [options] <in.conf> <out.txt>\n";
 	print " <in.conf> [string]: the first column is the dir or file name, and the second column is the group name\n";
 	print " -base            [string] : base dir of input data\n";
-	print " -type            [string] : AS type ([cass]|taca|alt5|alt3|mutx|iret|apa|snv)\n";
+	print " -type            [string] : AS type ([cass]|taca|alt5|alt3|mutx|iret|apat|apa|snv)\n";
 	print " -test            [string] : statistical test method ([fisher]|chisq|g|glm)\n";
 	print " --min-cov        [int]    : min coverage to calculate FDR ($minCoverage)\n";
 	print " --id2gene2symbol [file]   : mapping file of id to gene to symbol\n";
@@ -74,7 +75,7 @@ Carp::croak "cannot mkdir at $cache\n" unless $ret == 0;
 
 print "loading configuration file from $configFile ...\n" if $verbose;
 Carp::croak "contig file $configFile does not exist\n" unless -f $configFile;
-my $groups = readConfigFile ($configFile, $base);
+my $groups = readConfigFile ($configFile, $base, $type);
 
 print "done.\n" if $verbose;
 
@@ -92,6 +93,8 @@ if (-f $id2gene2symbolFile)
 		chomp $line;
 		next if $line=~/^\s*$/;
 		my ($id, $geneId, $symbol) = split (/\t/, $line);
+		$geneId = "" unless $geneId;
+		$symbol = "" unless $symbol;
 		$id2gene2symbolHash{$id} = "$geneId//$symbol";
 	}	
 
@@ -296,6 +299,30 @@ for (my $i = 0; $i < $nAS; $i++)
 		$phi1 = $n1 > 0 ? $inc1/$n1 : 'NA';
 		$phi2 = $n2 > 0 ? $inc2/$n2 : 'NA';
 	}
+	elsif ($type eq 'apat')
+	{
+		#0				1
+		#isoform1Tags   isoform2Tags
+		$inc1 = $groupData[0][$i][0];	#tags in the common region
+        $ex1 = $groupData[0][$i][1];	#tags in the alt region
+
+        $inc2 = $groupData[1][$i][0];
+        $ex2 = $groupData[1][$i][1];
+		
+		$n1 = $inc1;
+		$n2 = $inc2;
+
+		my $commonSize = $ASInfo->[$i][8];
+		my $altSize = $ASInfo->[$i][9];
+		
+		#in some rare cases, commonSize could be zero
+		$phi1 = $inc1 > 0 && $commonSize > 0 && $altSize > 0 ? $ex1/$altSize / ($inc1/$commonSize) : 'NA';
+		$phi2 = $inc2 > 0 && $commonSize > 0 && $altSize > 0 ? $ex2/$altSize / ($inc2/$commonSize) : 'NA';
+
+		$phi1 = 1 if $phi1 ne 'NA' && $phi1 > 1;
+		$phi2 = 1 if $phi2 ne 'NA' && $phi2 > 1;
+
+	}
 	elsif ($type eq 'apa' || $type eq 'snv')
 	{
 		#0              1          
@@ -318,7 +345,7 @@ for (my $i = 0; $i < $nAS; $i++)
 		Carp::croak "incorrect AS type: $type\n";
 	}	
 
-	my $dI = $n1>0 && $n2 > 0 ? $phi1 - $phi2 : 'NA';
+	my $dI = $phi1 ne 'NA' && $phi2 ne 'NA' ? $phi1 - $phi2 : 'NA';
 	my $cov = min ($inc1+$ex1, $inc2+$ex2, $inc1+$inc2, $ex1+$ex2);
 
 	push @statResult, [$cov, $phi1, $phi2, $dI, $pvalues->[$i]];
@@ -360,6 +387,10 @@ if ($type eq 'alt5' || $type eq 'alt3')
 {
 	push @header, "altSSDistance" if $type eq 'alt5' || $type eq 'alt3';
 }
+elsif ($type eq 'apat')
+{
+	push @header, qw(commonSize altSize);
+}
 elsif ($type eq 'apa')
 {
 	push @header, qw(geneId site1Pos site2Pos);
@@ -388,8 +419,8 @@ elsif ($type eq 'alt5' || $type eq 'alt3')
 }
 elsif ($type eq 'iret')
 {
-	push @header, qw(isoform1Tags_g1 isoform2Tags_g1 retainedIntronTags_g1 junctionTags_g1);
-	push @header, qw(isoform1Tags_g2 isoform2Tags_g2 retainedIntronTags_g2 junctionTags_g2);
+	push @header, qw(isoform1Tags_g1 isoform2Tags_g1 retainedIntronTags5SS_g1 retainedIntronTags3SS_g1 junctionTags_g1);
+	push @header, qw(isoform1Tags_g2 isoform2Tags_g2 retainedIntronTags5SS_g2 retainedIntronTags3SS_g2 junctionTags_g2);
 }
 elsif ($type eq 'mutx')
 {
@@ -400,6 +431,11 @@ elsif ($type eq 'taca')
 {
 	push @header, qw(isoform1Tags_g1 isoform2Tags_g1 exonTags_g1 inclusionJuncctionTags_g1 skippingJunctionTags_g1);
 	push @header, qw(isoform1Tags_g2 isoform2Tags_g2 exonTags_g2 inclusionJuncctionTags_g2 skippingJunctionTags_g2);
+}
+elsif ($type eq 'apat')
+{
+	push @header, qw(isoform1Tags_g1 isoform2Tags_g1);
+	push @header, qw(isoform1Tags_g2 isoform2Tags_g2);
 }
 elsif ($type eq 'apa')
 {
@@ -442,94 +478,6 @@ for (my $i = 0; $i < $nAS; $i++)
 close ($fout);
 
 system ("rm -rf $cache");
-
-
-sub readConfigFile
-{
-	my ($configFile, $base) = @_;
-	my $fin;
-	open ($fin, "<$configFile") || Carp::croak "cannot open file $configFile to read\n";
-	my $i = 0;
-	my %groups;
-
-	while (my $line = <$fin>)
-	{
-		chomp $line;
-		next if $line=~/^\s*$/;
-		next if $line=~/^\#/;
-		my ($sampleName, $groupName) = split (/\t/, $line);
-		$groups{$groupName}->{"id"} = $i++ unless exists $groups{$groupName};
-		push @{$groups{$groupName}->{"samples"}}, $sampleName;
-
-		my $inputFile = $base ne '' ? "$base/$sampleName" : $sampleName;
-        if (-d $inputFile)
-        {
-            $inputFile = "$inputFile/$type.count.txt";
-        }
-		Carp::croak "Input file $inputFile does not exist\n" unless -f $inputFile;
-	}
-	close ($fin);
-	return \%groups;
-}
-
-sub readASDataFile
-{
-	my ($inputFile, $type) = @_;
-	
-	my $fin;
-	my @data;
-	my @ASInfo;
-	open ($fin, "<$inputFile") || Carp::croak "cannot open file $inputFile to read\n";
-	while (my $line = <$fin>)
-	{
-		chomp $line;
-		next if $line =~/^\s*$/;
-		next if $line =~/^\#/;
-		
-		my @cols = split (/\t/, $line);
-		my (@infoCols, @dataCols);
-		
-		if ($type eq 'cass' || $type eq 'iret' || $type eq 'mutx' || $type eq 'taca')
-		{
-			@infoCols = @cols[0..7];
-			@dataCols = @cols[8..$#cols];
-			pop @dataCols if @dataCols > 5 && $type eq 'taca';
-			#to exclude the last column of taca in the new format
-			#04/17/2014
-		}
-		elsif ($type eq 'alt3' || $type eq 'alt5')
-		{
-			@infoCols = @cols[0..7];
-			push @infoCols, $cols[10];
-			@dataCols = @cols[8..9];
-			push @dataCols, @cols[11..$#cols];
-		}
-		elsif ($type eq 'apa')
-        {
-            #polyA seq data
-            @infoCols = @cols[0..7];
-			push @infoCols, @cols[10..$#cols];
-            @dataCols = @cols[8..9];
-        }
-		elsif ($type eq 'snv')
-		{
-			@infoCols = @cols[0..7];
-			push @infoCols, @cols[10..11];
-			@dataCols = @cols[8..9];
-			push @dataCols, @cols[12..$#cols];
-		}
-		else
-		{
-			Carp::croak "incorrect AS type: $type\n";
-		}
-		
-		push @ASInfo, \@infoCols;
-		push @data, \@dataCols;
-	}
-	close ($fin);
-
-	return {ASInfo=>\@ASInfo, data=>\@data};
-}
 
 
 

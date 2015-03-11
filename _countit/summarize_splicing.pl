@@ -43,7 +43,7 @@ if (@ARGV != 3)
 	print " <tag.bed> -- bed file of all tags, gz file allowed\n";
 	print "OPTIONS:\n";
 	print " -big           : the tag file is big\n";
-	print " -type [string] : AS type ([cass]|taca|alt5|alt3|mutx|iret|alts|altt)\n";
+	print " -type [string] : AS type ([cass]|taca|alt5|alt3|mutx|iret|apat|alts|altt)\n";
 	print " -weight        : weight tags according to score\n";
 	print " -mean          : find means instead of sum (default off)\n";
 	print " --ss           : consider the two strands separately\n";
@@ -59,7 +59,7 @@ my ($ASEventBedFile, $tagBedFile, $summaryFile) = @ARGV;
 	
 my $tagJunctionBedFile = "$cache/tag.junction.bed";
 
-if ($asType ne 'altt' && $asType ne 'alts') #alt start or alt termination
+if ($asType ne 'altt' && $asType ne 'alts' && $asType ne 'apat') #alt start or alt termination
 {
 	my $cmd = "grep -v \"^track\" $tagBedFile | awk '{if(NF==12 && \$10>1) {print \$0}}' > $tagJunctionBedFile";
 	$cmd = "gunzip -c $tagBedFile | grep -v \"^track\" | awk '{if(NF==12 && \$10>1) {print \$0}}' > $tagJunctionBedFile" if $tagBedFile =~/\.gz$/;
@@ -119,31 +119,40 @@ elsif ($asType eq 'alt5' || $asType eq 'alt3')
 elsif ($asType eq 'iret')
 {
 	#get the retained intron
-	my $cmd = "perl $cmdDir/gene2ExonIntron.pl -v -internal -nid -oi $ASExonBedFile $ASEventBedFile";
+	my $cmd = "perl $cmdDir/gene2ExonIntron.pl -v -internal -nid -oi $ASExonBedFile.tmp $ASEventBedFile";
 	print $cmd, "\n" if $verbose;
 	my $ret = system ($cmd);
 	Carp::croak "CMD crashed: $cmd, $?\n" unless $ret == 0;
 
 	#$cmd = "perl ~/scripts/bedExt.pl -n up -l \"-5\" -r 5 $ASExonBedFile $ASExonBedFile.5SS";
-	$cmd = "perl $cmdDir/bedExt.pl -n up -l \"5\" -r 5 $ASExonBedFile $ASExonBedFile.5SS";	#2012-06-12
+	$cmd = "perl $cmdDir/bedExt.pl -n up -l \"5\" -r 5 $ASExonBedFile.tmp - | awk '{print \$1\"\\t\"\$2\"\\t\"\$3\"\\t\"\$4\":5ss\\t\"\$5\"\\t\"\$6}' > $ASExonBedFile";	#2012-06-12
 	print $cmd, "\n" if $verbose;
 	$ret = system ($cmd);
 	Carp::croak "CMD crashed: $cmd, $?\n" unless $ret == 0;
 	
 	#$cmd = "perl ~/scripts/bedExt.pl -n down -l \"-5\" -r 5 $ASExonBedFile $ASExonBedFile.3SS";
-	$cmd = "perl $cmdDir/bedExt.pl -n down -l \"-5\" -r \"-5\" $ASExonBedFile $ASExonBedFile.3SS";  #2012-06-12
-
-	#changes in 2012-06-12
-	#we count the tags that overlaps with +5 relative to the 5'ss and -5 relative to the 3'ss as evidence of retained introns
-	#this is to avoid mapping errors in which a junction read is mapped as an exon body read, when the overlap with one side is very short
+	$cmd = "perl $cmdDir/bedExt.pl -n down -l \"-5\" -r \"-5\" $ASExonBedFile.tmp - |awk '{print \$1\"\\t\"\$2\"\\t\"\$3\"\\t\"\$4\":3ss\\t\"\$5\"\\t\"\$6}' >> $ASExonBedFile";  #2012-06-12
 	
 	print $cmd, "\n" if $verbose;
 	$ret = system ($cmd);
 	Carp::croak "CMD crashed: $cmd, $?\n" unless $ret == 0;
 
-	system ("cat $ASExonBedFile.5SS $ASExonBedFile.3SS > $ASExonBedFile");
-	system ("rm $ASExonBedFile.5SS $ASExonBedFile.3SS");	
+	system ("rm -rf $ASExonBedFile.tmp");
+	
+	#changes in 2012-06-12
+	#we count the tags that overlaps with +5 relative to the 5'ss and -5 relative to the 3'ss as evidence of retained introns
+	#this is to avoid mapping errors in which a junction read is mapped as an exon body read, when the overlap with one side is very short
+	
+	#11/20/2014, now we output reads overlap with 5'/3' end of the intron separately
 }
+elsif ($asType eq 'apat')
+{
+	my $cmd = "cp $ASEventBedFile $ASExonBedFile";
+	print $cmd, "\n" if $verbose;
+    my $ret = system ($cmd);
+    Carp::croak "CMD crashed: $cmd, $?\n" unless $ret == 0;
+}
+
 elsif ($asType eq 'alts' || $asType eq 'altt')
 {
 	my $cmd = "perl $cmdDir/bedExt.pl -n up -l \"5\" -r 5 $ASEventBedFile $ASExonBedFile";
@@ -165,7 +174,7 @@ print $cmd, "\n" if $verbose;
 my $ret = system ($cmd);
 Carp::croak "CMD crashed: $cmd, $?\n" unless $ret == 0;
 
-if ($asType eq 'taca' || $asType eq 'iret')
+if ($asType eq 'taca')
 {
 	#get the total or average of multiple exons
 	print "sum up tags on AS exons ...\n" if $verbose;
@@ -180,7 +189,7 @@ if ($asType eq 'taca' || $asType eq 'iret')
 ######################################################
 
 my $ASJunctionTagCountFile = "$cache/as.junction.tagcount.bed";
-if ($asType ne 'alts' && $asType ne 'altt')
+if ($asType ne 'alts' && $asType ne 'altt' && $asType ne 'apat')
 {
 
 	print "extract introns from $ASEventBedFile ...\n" if $verbose;
@@ -191,89 +200,16 @@ if ($asType ne 'alts' && $asType ne 'altt')
 	$ret = system ($cmd);
 	Carp::croak "CMD crashed: $cmd, $?\n" unless $ret == 0;
 
-	print "extracting introns from $tagJunctionBedFile ...\n" if $verbose;
-	my $tagIntronBedFile = "$cache/tag.intron.bed";
-	#this will keep the score of each tag
-	$cmd = "perl $cmdDir/gene2ExonIntron.pl -v -oi $tagIntronBedFile $tagJunctionBedFile";
+	#deal with mean
+	my $meanFlag = $mean ? "-mean" : "";
+	
+	print "count junction tags for each intron ...\n" if $verbose;
+	$cmd = "perl $cmdDir/summarize_junction.pl $verboseFlag $ssFlag $weightFlag $meanFlag $ASIntronBedFile $tagJunctionBedFile $ASJunctionTagCountFile";
 	print $cmd, "\n" if $verbose;
 	$ret = system ($cmd);
-	Carp::croak "CMD crashed: $cmd, $?\n" unless $ret == 0;
-
-
-	print "match tag introns and AS introns ...\n" if $verbose;
-	my $intronMatchFile = "$cache/junction.vs.tag.match.bed";
-	#keep the score of each tag
-	$cmd = "perl $cmdDir/bedMatch.pl $verboseFlag $bigFlag $ssFlag -cache $cache/tmp_intron_match -keep-score 2 $ASIntronBedFile $tagIntronBedFile $intronMatchFile";
-	print $cmd, "\n" if $verbose;
-
-	$ret = system ($cmd);
-	Carp::croak "CMD crashed: $cmd, $?\n" unless $ret == 0;
-
-
-	print "count the number of tags for each AS intron ...\n" if $verbose;
-
-	my $tmpFile = "$cache/as.junction.tagcount.txt";
-
-	if ($weight)
-	{
-		#the name column: intron id//tag id//0, so we attach score at last
-		$cmd = "awk '{print \$5\"//\"\$4}' $intronMatchFile | awk -F \"//\" '{print \$2\"\\t\"\$1}' > $tmpFile";
-		print $cmd, "\n" if $verbose;
-		$ret = system ($cmd);
-		Carp::croak "CMD crashed: $cmd, $?\n" unless $ret == 0;
-
-		#get sum or average of all tags/probesets mapped to the intron
-		#$cmd = "perl $cmdDir/uniqRow.pl -v -c $summarizeMethod $tmpFile $tmpFile";
-		#print $cmd, "\n" if $verbose;
-		#$ret = system ($cmd);
-		#Carp::croak "CMD crashed: $cmd, $?\n" unless $ret == 0;
-
-		#too much memory required to call uniqRow.pl for very big files
-		#fix 04/21/2014 Chaolin Zhang
-
-		my $fin;
-		my %junctionCountHash;
-		open ($fin, "<$tmpFile") || Carp::croak "cannot open file $tmpFile to read\n";
-		while (my $line = <$fin>)
-		{
-			chomp $line;
-			next if $line=~/^\s*$/;
-
-			my ($asId, $weight) = split ("\t", $line);
-			$junctionCountHash{$asId}->{'w'}+= $weight;
-			$junctionCountHash{$asId}->{'n'}+=1;
-		}
-		close ($fin);
-		map {$junctionCountHash{$_}->{'w'} /= $junctionCountHash{$_}->{'n'}} keys %junctionCountHash if $summarizeMethod eq 'mean';
-		
-		my $fout;
-		open ($fout, ">$tmpFile") || Carp::croak "cannot open file $tmpFile to write\n";
-		foreach my $asId (sort keys %junctionCountHash)
-		{
-			print $fout join ("\t", $asId, $junctionCountHash{$asId}->{'w'}), "\n";
-		}
-		close ($fout);
-	}
-	else
-	{
-		#$cmd = "awk '{print \$4//1}' $intronMatchFile | awk -F \"//\" '{print \$1\\t\$4}' > $tmpFile";
-	
-		$cmd = "awk '{print \$4}' $intronMatchFile | awk -F \"//\" '{print \$1}' | sort -T $cache | uniq -c | awk '{print \$2\"\\t\"\$1}' > $tmpFile"; #$ASJunctionTagCountFile";
-		print $cmd, "\n" if $verbose;
-		$ret = system ($cmd);
-		Carp::croak "CMD crashed: $cmd, $?\n" unless $ret == 0;
-	}
-
-	print "convert $tmpFile to bed file $ASJunctionTagCountFile ..." if $verbose;
-	$cmd= "awk '{print \$4}' $ASIntronBedFile > $ASIntronBedFile.id";
-	system ($cmd);
-	
-	$cmd = "perl $cmdDir/selectRow.pl -p -pt 0  $tmpFile $ASIntronBedFile.id > $tmpFile.sort";
-	system ($cmd);
-
-	$cmd = "paste $ASIntronBedFile $tmpFile.sort | awk '{print \$1\"\\t\"\$2\"\\t\"\$3\"\\t\"\$4\"\\t\"\$8\"\\t\"\$6}' > $ASJunctionTagCountFile";
-	system ($cmd);
+    Carp::croak "CMD crashed: $cmd, $?\n" unless $ret == 0;
 }
+
 
 ########################################################################
 #put counts of exonic tags and junctoin tags together into a hash table
@@ -293,10 +229,27 @@ foreach my $e (@$exonTagCount)
 	my $name = $e->{"name"};
 	my $count = $e->{"score"};
 
-	$name =~/^(.*?)\[(.*?)\]\[(.*?)\]/;
-	my $asId = $1;
-	my $isoformId = $2;
-	my $evi = $3;
+	my ($asId, $isoformId, $evi) = ("", "", "");
+
+	if ($name =~/^(.*?)\[(.*?)\]\[(.*?)\]/)
+	{
+		($asId, $isoformId, $evi) = ($1, $2, $3);
+		$isoformId = "SPLICE" if $asId eq 'iret';
+	}
+	elsif ($asType eq 'iret')
+	{
+		#11/20/2014, cz
+		#make an exception for intron retention to allow more flexible naming
+		$asId = $name;
+		$asId =~s/:[5|3]ss$//g;
+
+		$isoformId = "SPLICE";
+		$evi = 0;
+	}
+	else
+	{
+		Carp::croak "incorrect in format: $name\n";
+	}
 
 	if ($asType eq 'cass' || $asType eq 'taca')
 	{
@@ -335,11 +288,24 @@ foreach my $e (@$exonTagCount)
 	elsif ($asType eq 'iret')
 	{
 		my $isoformIdPair = "SPLICE/RET";
-		$tagCountHash{$asId}->{$isoformIdPair}->{"exon"} = $count;
+		
+		if ($name =~/:5ss$/)
+		{
+			$tagCountHash{$asId}->{$isoformIdPair}->{"exon"}->{'5ss'} = $count;
+		}
+		elsif ($name =~/:3ss$/)
+		{
+			$tagCountHash{$asId}->{$isoformIdPair}->{"exon"}->{'3ss'} = $count;
+		}
+		else
+		{
+			Carp::croak "incorrect format: $name\n";
+		}
 	}
-	elsif ($asType eq 'alts' || $asType eq 'altt')
+	elsif ($asType eq 'apat' || $asType eq 'alts' || $asType eq 'altt')
 	{
 		$tagCountHash{$asId}->{$isoformId}->{"exon"} = $count;
+		$tagCountHash{$asId}->{$isoformId}->{'size'} = $e->{'chromEnd'} - $e->{'chromStart'} + 1 if $asType eq 'apat';
 	}
 
 	#$name = join ("", $asId, "[", $isoformId, "][", $evi, "]");
@@ -349,8 +315,8 @@ foreach my $e (@$exonTagCount)
 }
 
 
-#pair alternative start or termination
-if ($asType eq 'alts' || $asType eq 'altt')
+#pair apat, alternative start or termination
+if ($asType eq 'apat' || $asType eq 'alts' || $asType eq 'altt')
 {
 	foreach my $asId (keys %tagCountHash)
 	{
@@ -364,6 +330,12 @@ if ($asType eq 'alts' || $asType eq 'altt')
 				next unless exists $isoforms->{"A$j"};
 				$isoformPairs{"A$i/A$j"}->{"exon"}->{"A$i"} = $isoforms->{"A$i"}->{"exon"};
 				$isoformPairs{"A$i/A$j"}->{"exon"}->{"A$j"} = $isoforms->{"A$j"}->{"exon"};
+				
+				if ($asType eq 'apat')
+				{
+					$isoformPairs{"A$i/A$j"}->{"size"}->{"A$i"} = $isoforms->{"A$i"}->{"size"};
+					$isoformPairs{"A$i/A$j"}->{"size"}->{"A$j"} = $isoforms->{"A$j"}->{"size"};
+				}
 			}
 		}
 		$tagCountHash{$asId} = \%isoformPairs;
@@ -373,7 +345,7 @@ if ($asType eq 'alts' || $asType eq 'altt')
 #
 
 #junction tag counts
-if ($asType ne 'alts' && $asType ne 'altt')
+if ($asType ne 'apat' && $asType ne 'alts' && $asType ne 'altt')
 {
 	my $junctionTagCount = readBedFile ($ASJunctionTagCountFile, $verbose);
 	
@@ -387,14 +359,30 @@ if ($asType ne 'alts' && $asType ne 'altt')
 		my $count = $j->{"score"};
 
 		#$name =~/^(.*?)\[(.*?)\]\[(.*?)\]\_(\d+)$/;
-	
-		$name =~/^(.*?)\[(.*?)\]\[(.*?)\].*?\_(\d+)$/; #to accomodate the pattern of new mutx ids
 		
-		my $asId = $1;
-		my $isoformId = $2;
-		my $evi = $3;
-		my $junctionId = $4;
+		my ($asId, $isoformId, $evi, $junctionId);
 	
+		if ($name =~/^(.*?)\[(.*?)\]\[(.*?)\].*?\_(\d+)$/)
+		{
+			#to accomodate the pattern of new mutx ids
+			($asId, $isoformId, $evi, $junctionId) = ($1, $2, $3, $4);
+			$isoformId = "SPLICE" if $asId eq 'iret';
+		}
+		elsif ($asType eq 'iret')
+		{
+			$asId = $name;
+			$asId =~s/_\d+$//g;
+
+			$isoformId = "SPLICE";
+			$evi = 0;
+			$junctionId = 0;
+		}
+		else
+		{
+			Carp::croak "incorrect format: $name\n";
+		}
+
+
 		if ($asType eq 'cass')
 		{
 			#$name = join ("", $asId, "[INC/SKIP][", $evi, "]");
@@ -511,7 +499,12 @@ elsif ($asType eq 'mutx')
 elsif ($asType eq 'iret')
 {
 	print $fout "#", join ("\t", @fixedColumnHeader,
-			"retainedIntronTags", "junctionTags"), "\n";
+			"retainedIntron5SSTags", "retainedIntron3SSTags", "junctionTags"), "\n";
+}
+elsif ($asType eq 'apat')
+{
+	print $fout "#", join ("\t", @fixedColumnHeader,
+			"commonSize", "altSize"), "\n";
 }
 elsif ($asType eq 'alts' || $asType eq 'altt')
 {
@@ -528,15 +521,33 @@ my %ASEoutput;
 foreach my $e (@$ASEvents)
 {
 	my $name = $e->{"name"};
-	$name =~/^(.*?)\[(\w+)\]/;
 
-	my $asId = $1;
-	my $isoformId = $2;
+	my ($asId, $isoformId) = ("", "");
+	
+	if ($name =~/^(.*?)\[(.*?)\]/)
+	{
+		$asId = $1;
+		$isoformId = $2;
+		$isoformId = "SPLICE" if $asId eq 'iret';
+	}
+	elsif ($asType eq 'iret')
+	{
+		#11/20/2014, cz
+		#make an exception for iret, since there is only one spliced isoform in the id
+
+		$asId = $name;
+		#$asId =~s/:[5|3]ss$//g;
+
+		$isoformId = "SPLICE";
+	}
+	else
+	{
+		Carp::croak "incorrect name format: $name\n";
+	}
+
 
 	#$asId =~/^(\w\w)/;
 	#my $asType = $1;
-
-	#next unless $asType eq 'CA'; # cassette exons only for now
 
 	next if (($asType eq 'cass' || $asType eq 'taca') && $isoformId eq 'SKIP');
 
@@ -630,11 +641,20 @@ foreach my $e (@$ASEvents)
 		}
 		elsif ($asType eq 'iret')
 		{
-			my $intronTagCount = exists $ase->{"exon"} ? $ase->{"exon"} : 0;
+			my $intronTagCount5SS = exists $ase->{"exon"} && $ase->{'exon'}{'5ss'} ? $ase->{"exon"}{'5ss'} : 0;
+			my $intronTagCount3SS = exists $ase->{"exon"} && $ase->{'exon'}{'3ss'} ? $ase->{"exon"}{'3ss'} : 0;
+			my $intronTagCount = $intronTagCount5SS + $intronTagCount3SS;
+
 			my $junctionTagCount = exists $ase->{"junction"} ? $ase->{"junction"} : 0;
 			print $fout join ("\t", $e->{"chrom"}, $e->{"chromStart"}, $e->{"chromEnd"}, $e->{"name"}, $e->{"score"}, $e->{"strand"}, $asType, "RET/SPLICE",
 				$intronTagCount, $junctionTagCount, 
-				$intronTagCount, $junctionTagCount), "\n";
+				$intronTagCount5SS, $intronTagCount3SS, $junctionTagCount), "\n";
+		}
+		elsif ($asType eq 'apat')
+		{
+			my ($isoformId1, $isoformId2) = split (/\//, $isoformIdPair);
+			print $fout join ("\t", $e->{"chrom"}, $e->{"chromStart"}, $e->{"chromEnd"}, $e->{"name"}, $e->{"score"}, $e->{"strand"}, $asType, $isoformIdPair,
+				$ase->{"exon"}->{$isoformId1}, $ase->{"exon"}->{$isoformId2} - $ase->{"exon"}->{$isoformId1}, $ase->{"size"}->{$isoformId1}, $ase->{"size"}->{$isoformId2} - $ase->{"size"}->{$isoformId1}), "\n";
 		}
 		elsif ($asType eq 'alts' || $asType eq 'altt')
 		{

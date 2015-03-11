@@ -8,6 +8,7 @@ use Carp;
 use Data::Dumper;
 
 use MyConfig;
+use Quantas;
 
 my $prog = basename ($0);
 my $verbose = 0;
@@ -266,26 +267,5 @@ Carp::croak "cmd=$cmd failed\n" unless $ret == 0;
 
 system ("rm -rf $cache") unless $keepCache;
 
-
-sub readConfigFile
-{
-	my ($configFile, $base) = @_;
-	my $fin;
-	open ($fin, "<$configFile") || Carp::croak "cannot open file $configFile to read\n";
-	my $i = 0;
-	my %groups;
-
-	while (my $line = <$fin>)
-	{
-		chomp $line;
-		next if $line=~/^\s*$/;
-		next if $line=~/^\#/;
-		my ($sampleName, $groupName) = split (/\t/, $line);
-		$groups{$groupName}->{"id"} = $i++ unless exists $groups{$groupName};
-		push @{$groups{$groupName}->{"samples"}}, $sampleName;
-	}
-	close ($fin);
-	return \%groups;
-}
 
 

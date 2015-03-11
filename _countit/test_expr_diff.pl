@@ -8,7 +8,6 @@ use Carp;
 use Data::Dumper;
 
 use Scalar::Util qw(looks_like_number);
-use Statistics::Basic qw(:all);
 
 use MyConfig;
 
@@ -16,6 +15,9 @@ my $prog = basename ($0);
 my $verbose = 0;
 my $dispersion = "tagwise"; #"common"
 my $MAPlotFile = "";
+my $MAPlotFDR = 0.05;
+my $MAPlotLogFC=1;
+
 my $cache = getDefaultCache ($prog);
 my $printRPKM = 0;
 my $base = "";
@@ -26,6 +28,8 @@ GetOptions (
 	"base:s"=>\$base,
 	"disp:s"=>\$dispersion,
 	"MAplot:s"=>\$MAPlotFile,
+	"FDR:f"=>\$MAPlotFDR,
+	"logFC:f"=>\$MAPlotLogFC,
 	"rpkm"=>\$printRPKM,
 	"c:s"=>\$cache,
 	"v|verbose"=>\$verbose
@@ -38,6 +42,8 @@ if (@ARGV != 2)
 	print " -base         [string] : base dir of input data\n";
 	print " -disp         [string] : ([tagwise]|common|common:0.1)\n";
 	print " -MAplot       [file]   : file name to write MAplot\n";
+	print " -FDR          [float]  : FDR to highlight genes in MAplot ($MAPlotFDR)\n";
+	print " -logFC        [float]  : log2FC to highlight genes in MAplot($MAPlotLogFC)\n";
 	print " -rpkm                  : include average group RPKM values\n";
 	print " -c            [dir]    : cache dir\n";
 	print " -v                     : verbose\n";
@@ -143,7 +149,7 @@ if ($MAPlotFile)
 {
 
 print $fout <<EOF;
-detags.diff.common <- rownames(de.common\$table[p.adj <0.05 & abs(log2FC) > 1,])
+detags.diff.common <- rownames(de.common\$table[p.adj <$MAPlotFDR & abs(log2FC) > $MAPlotLogFC,])
 pdf (file="$MAPlotFile")
 plotSmear(de.common, pair=c("$groupNames[1]", "$groupNames[0]"), de.tags = detags.diff.common, main = "MA Plot Using Common Dispersion")
 #abline(h = c(-1, 1), col = "dodgerblue", lwd = 2)
@@ -194,7 +200,7 @@ if ($MAPlotFile)
 {
 	print $fout <<EOF;
 
-detags.diff.tagwise <- rownames(de.tagwise\$table[p.adj <0.05 & abs(log2FC) > 1,])
+detags.diff.tagwise <- rownames(de.tagwise\$table[p.adj <$MAPlotFDR & abs(log2FC) > $MAPlotLogFC,])
 pdf (file="$MAPlotFile")
 plotSmear(de.tagwise, pair=c("$groupNames[1]", "$groupNames[0]"), de.tags = detags.diff.tagwise, main = "MA Plot Using Tagwise Dispersion")
 #abline(h = c(-1, 1), col = "dodgerblue", lwd = 2)
@@ -276,10 +282,9 @@ if ($printRPKM)
 
 	my %RPKMMeans;
 
-	my %RPKMFilter; #whether the max of the groups is above the median
 	foreach my $gene (keys %RPKMs)
 	{
-		$RPKMFilter{$gene} = 0; #note that we assume RPKM cannot be negative
+		#$RPKMFilter{$gene} = 0; #note that we assume RPKM cannot be negative
 		foreach my $group (@groupNames)
 		{
 			my $sum = 0;
@@ -299,12 +304,8 @@ if ($printRPKM)
 			}
 			
 			$RPKMMeans{$gene}{$group} = $sum / (scalar @$samples);
-			$RPKMFilter{$gene} = $RPKMMeans{$gene}{$group} if $RPKMFilter{$gene} < $RPKMMeans{$gene}{$group};
 		}
 	}
-
-	my $med = median (values %RPKMFilter);
-	map {$RPKMFilter{$_} = $RPKMFilter{$_} > $med ? 1 : 0} keys %RPKMFilter;	
 
 
 	open (INFILE, $outFile) || Carp::croak "cannot open $outFile to read\n";
@@ -325,7 +326,6 @@ if ($printRPKM)
 			{
 				print OUTFILE "\tRPKM($group)";
 			}
-			print OUTFILE "\tRPKMFilter";
 		}
 		else
 		{
@@ -336,7 +336,6 @@ if ($printRPKM)
 			{
 				print OUTFILE "\t$RPKMMeans{$gene}{$group}";
 			}
-			print OUTFILE "\t", $RPKMFilter{$gene};
 		}
 
 		print OUTFILE "\n";

@@ -244,7 +244,7 @@ sub median
 	my @values = @_;
 	my $median;
 	my $mid = int @values/2;
-	my @sorted_values = sort by_number @values;
+	my @sorted_values = sort {$a <=> $b} @values;
 	if (@values % 2) {
 	    $median = $sorted_values[ $mid ];
 	} else {
@@ -252,6 +252,4 @@ sub median
 	} 
 }
 
-sub by_number {
-    if ($a < $b){ -1 } elsif ($a > $b) { 1 } else { 0 }
-}
+

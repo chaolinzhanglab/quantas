@@ -33,6 +33,7 @@ my $get_alt5 = 0;
 my $get_alt3 = 0;
 my $get_mutx = 0;
 my $get_iret = 0;
+my $get_apat = 0;
 my $get_alts = 0;
 my $get_altt = 0;
 
@@ -74,6 +75,7 @@ if (@ARGV != 2)
 	print " -alt3          : annotate alt3\n";
 	print " -mutx          : annotate mutx\n";
 	print " -iret          : annotate iret\n";
+	print " -apat          : annotate apat\n";
 	print " -alts          : annotate alts\n";
 	print " -altt          : annotate altt\n";
 	print " -c     [string]: cache dir ($cache) \n";
@@ -101,8 +103,9 @@ $analyses{'alt5'} = 3 if $get_alt5;
 $analyses{'alt3'} = 4 if $get_alt3;
 $analyses{'mutx'} = 5 if $get_mutx;
 $analyses{'iret'} = 6 if $get_iret;
-$analyses{'alts'} = 7 if $get_alts;
-$analyses{'altt'} = 8 if $get_altt;
+$analyses{'apat'} = 7 if $get_apat;
+$analyses{'alts'} = 8 if $get_alts;
+$analyses{'altt'} = 9 if $get_altt;
 
 
 Carp::croak "no AS type chosen\n" if (keys %analyses) == 0;

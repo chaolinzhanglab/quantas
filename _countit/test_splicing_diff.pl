@@ -50,6 +50,7 @@ if (@ARGV != 2)
 	print " -base            [string] : base dir of input data\n";
 	print " -type            [string] : AS type ([cass]|taca|alt5|alt3|mutx|iret|apat|apa|snv)\n";
 	print " -test            [string] : statistical test method ([fisher]|chisq|g|glm)\n";
+	#print " -test            [string] : statistical test method ([fisher]|chisq|g|glm|betabinom)\n";
 	print " --min-cov        [int]    : min coverage to calculate FDR ($minCoverage)\n";
 	print " --id2gene2symbol [file]   : mapping file of id to gene to symbol\n";
 	print " --filter-output           : filter output by FDR and dI\n";
@@ -194,6 +195,10 @@ elsif ($test eq 'g')
 elsif ($test eq 'glm')
 {
 	$pvalues = glmTest (\%sampleData, $groups, $verbose);
+}
+elsif ($test eq 'betabinom')
+{
+	$pvalues = betaBinomTest (\%sampleData, $groups, $verbose);
 }
 else
 {
@@ -871,3 +876,138 @@ EOF
 
 	return \@p;
 }
+
+sub betaBinomTest
+{
+	my ($sampleData, $groups, $verbose) = @_;
+
+	my @groupNames = sort {$groups->{$a}->{"id"} <=> $groups->{$b}->{"id"}} keys %$groups;
+	my %sampleData = %$sampleData;
+
+	my $nAS = @{$sampleData{$groups->{$groupNames[0]}->{"samples"}->[0]}};
+
+	my @pvalues;
+
+	my @N;
+	my @meanScaledX;
+	my @binomVarScaledX;
+	my @varScaledX;
+	for (my $i = 0; $i < $nAS; $i++)
+	{
+		print "$i ...\n" if $verbose && $i % 1000 == 0;
+
+		my @isoform1;
+		my @isoform2;
+
+		#H1: there is differential splicing
+		my $chisqH1 = 0;
+		#print "i=$i\n" if $i == 1317;
+
+		for (my $g = 0; $g < @groupNames; $g++)
+		{
+			my $gName = $groupNames[$g];
+		
+			my $samples = $groups->{$gName}->{"samples"};
+			my $numSamples = @$samples;
+			my $nGeoMean = 0;
+			for (my $j = 0; $j < @$samples; $j++)
+			{
+				my $s = $samples->[$j];
+				my $in = $sampleData{$s}->[$i][0];
+				my $ex = $sampleData{$s}->[$i][1];
+				my $n = $in + $ex;
+				$n = 1 if $n < 1;
+
+				$nGeoMean += log($n);
+			}
+			
+			$nGeoMean /= $numSamples;
+			$nGeoMean = exp($nGeoMean);
+
+			my @scaledX;
+
+			for (my $j = 0; $j < @$samples; $j++)
+			{
+				my $s = $samples->[$j];
+                my $in = $sampleData{$s}->[$i][0];
+                my $ex = $sampleData{$s}->[$i][1];
+                my $n = $in + $ex;
+                $n = 1 if $n < 1;
+
+				my $scaling = $n / $nGeoMean;
+
+				my $inScale = $in / $scaling;
+				push @scaledX, $inScale;				
+			}
+
+			my $meanX = mean (\@scaledX);
+			my $p = $meanX / $nGeoMean;
+			my $binomVarX = $meanX * (1 - $p);
+			my $varX = stdev (\@scaledX)**2;
+			#print join ("\t", "scaledX=", @scaledX, $meanX, $varX), "\n";
+			
+			push @{$N[$g]}, $nGeoMean;
+			push @{$meanScaledX[$g]}, $meanX;
+			push @{$binomVarScaledX[$g]}, $binomVarX;
+			push @{$varScaledX[$g]}, $varX;
+		}
+	}
+	
+	my $fout;
+	open ($fout, ">out.tmp.txt");
+	for (my $i = 0; $i < $nAS; $i++)
+	{
+
+		for (my $g = 0; $g < @groupNames; $g++)
+		{
+			my $gName = $groupNames[$g];
+			my $samples = $groups->{$gName}->{"samples"};
+			#my @i1 = map {$sampleData{$_}->[$i][0]} @$samples;
+			#my @i2 = map {$sampleData{$_}->[$i][1]} @$samples;
+			print $fout "\t", join ("\t", $gName, $N[$g][$i], $meanScaledX[$g][$i], $binomVarScaledX[$g][$i], $varScaledX[$g][$i]);
+		}
+		print $fout "\n";
+	}
+	close ($fout);
+
+	Carp::croak "exist\n";
+
+=head
+			my @i1 = map {$sampleData{$_}->[$i][0]} @$samples;
+			my @i2 = map {$sampleData{$_}->[$i][1]} @$samples;
+		
+			#$groupIsoform1Sum[$g] = sum (\@i1);
+			#$groupIsoform2Sum[$g] = sum (\@i2);
+	
+			$chisqH1 += gscore ([\@i1, \@i2]);
+
+			#print "chisqH1 = $chisqH1\n";		
+	
+			push @isoform1, @i1;
+			push @isoform2, @i2;
+		}
+
+		#H0: no differential splicing
+		my $chisqH0 = gscore ([\@isoform1, \@isoform2]);
+
+		#print "chisqH0 = $chisqH0\n";	
+
+		#chisq difference test
+		#http://www.psychologie.uzh.ch/fachrichtungen/methoden/team/christinawerner/sem/chisquare_diff_en.pdf
+		my $chisq = $chisqH0 - $chisqH1;
+		$chisq = 0 if $chisq < 0;
+		
+		my $p = 1- pchisq ($chisq, 1);
+		$p = 0 if $p < 0;
+		#print "p=$p\n";
+
+		$pvalues[$i] = $p;
+		#Carp::croak "i=1317\n" if $i == 1317;
+	}
+=cut
+	return \@pvalues;
+}
+
+
+
+

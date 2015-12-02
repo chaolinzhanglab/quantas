@@ -99,6 +99,12 @@ if ($sizeDistFile ne '')
 	Carp::croak "size distribution file does not exists\n" unless -f $sizeDistFile;
 }
 
+if ($libraryType ne 'unstranded' && $libraryType ne 'stranded-as' && $libraryType ne 'stranded-sa')
+{
+	Carp::croak "incorrect library type: $libraryType\n";
+}
+
+
 print `date` if $verbose;
 
 my $verboseFlag = $verbose ? '-v' : '';
@@ -147,10 +153,10 @@ my $np_split = int ($np / $nsplit);
 $np_split++ if $np % $np_split != 0;
 
 my $n1s_split = int ($n1s / $nsplit); 
-$n1s_split++ if $n1s % $n1s_split != 0;
+$n1s_split++ if $n1s > 0 && $n1s % $n1s_split != 0;
 
 my $n2s_split = int ($n2s / $nsplit); 
-$n2s_split++ if $n2s % $n2s_split != 0;
+$n2s_split++ if $n2s > 0 && $n2s % $n2s_split != 0;
 
 
 print "np_split = $np_split, n1s_split=$n1s_split, n2s_split=$n2s_split\n" if $verbose;

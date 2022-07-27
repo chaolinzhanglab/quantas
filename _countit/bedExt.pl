@@ -1,4 +1,5 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
+
 #
 
 use strict;
@@ -48,6 +49,8 @@ if (@ARGV != 2)
 
 my ($in, $out) = @ARGV;
 
+my $msgio = $out ne '-' ? *STDOUT : *STDERR;
+
 if ($chrLenFile)
 {
 	my $fin;
@@ -85,17 +88,15 @@ else
 }
 
 my $foutBed;
-{
-	Carp::croak "$out already exists\n" if -f $out && $out ne "-";
+#Carp::croak "$out already exists\n" if -f $out && $out ne "-";
 
-	if ($out eq '-')
-	{
-		$foutBed = *STDOUT;
-	}
-	else
-	{
-		open ($foutBed, ">$out") || Carp::croak "can not open file $out to write\n";
-	}
+if ($out eq '-')
+{
+	$foutBed = *STDOUT;
+}
+else
+{
+	open ($foutBed, ">$out") || Carp::croak "can not open file $out to write\n";
 }
 
 my $i = 0;
@@ -105,7 +106,7 @@ while (my $line = <$fin>)
 
 	next if $line =~/^\s*$/;
 
-	print STDERR "$i ...\n" if $verbose && $i % 100000 == 0;
+	print $msgio "$i ...\n" if $verbose && $i % 100000 == 0;
 	$i++;
 
 	my $r = lineToBed ($line);
@@ -135,7 +136,7 @@ while (my $line = <$fin>)
 		}
 		if ($chromEnd < $chromStart)
 		{
-			print STDERR "$chrom:$chromStart-$chromEnd is too small for truncation\n" if $verbose;
+			print $msgio "$chrom:$chromStart-$chromEnd is too small for truncation\n" if $verbose;
 			next;
 		}
 	}

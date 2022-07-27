@@ -1,12 +1,15 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 use strict;
+use warnings;
+
 use Getopt::Long;
 use File::Basename;
 
 use Carp;
 use Data::Dumper;
 
+use Quantas;
 
 my $prog = basename ($0);
 my $verbose = 0;
@@ -95,7 +98,7 @@ foreach my $gName (@groupNames)
 		print "$iter: group=$gName, sample=$s\n" if $verbose;
 		my $inputFile = $base ne '' ? "$base/$s" : $s;
 
-		my $sdata = readJunctionDataFile ($inputFile);
+		my $sdata = readBed6DataFile ($inputFile);
 		$junctionInfo = $sdata->{"info"};
 		if ($nJunction != 0)
 		{

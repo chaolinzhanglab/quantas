@@ -24,10 +24,10 @@ GetOptions ("v"=>\$verbose,
 
 if (@ARGV != 3)
 {
-	print "filter polyA sites from polyA seq\n";
+	print "define alternative polyA sites detected in polyA seq\n";
 	print " Usage: $prog [options] <in.bed> <site2gene> <out.bed>\n";
-	print " -N [int]  : min total number of tags for the gene ($minTotal)\n";
-	print " -r [float]: min ratio of tags for the site among all sites in the gene ($minRatio)\n"; 
+	#print " -N [int]  : min total number of tags for the gene ($minTotal)\n";
+	#print " -r [float]: min ratio of tags for the site among all sites in the gene ($minRatio)\n"; 
 	print " -v        : verbose\n";
 	exit (1);
 }
@@ -80,31 +80,49 @@ print "polyA sites are sorted into $n genes\n" if $verbose;
 
 my $fout;
 
-print "filter polyA sites ...\n" if $verbose;
+print "dump alt. polyA sites ...\n" if $verbose;
 
 open ($fout, ">$outBedFile") || Carp::croak "cannot open file $outBedFile to write\n";
 $i = 0;
 
-foreach my $geneId (sort {$a <=> $b} keys %siteHash)
+foreach my $geneId (sort {$a cmp $b} keys %siteHash)
 {
 
 	print "$i ...\n" if $verbose && $i % 10000 == 0;
 	$i++;
 
-	next unless $siteHash{$geneId}->{'N'} >= $minTotal;
-	my $sites = $siteHash{$geneId}->{'sites'};
+	#next unless $siteHash{$geneId}->{'N'} >= $minTotal;
+	my @sitesOnGene = sort {$a->{'chromStart'} <=> $b->{'chromStart'}} @{$siteHash{$geneId}->{'sites'}};
 	
-	foreach my $s (@$sites)
-	{
-		next unless $s->{'score'} / $siteHash{$geneId}->{'N'} >= $minRatio;
-		#$s->{'name'} .= "//" . $geneId;
+	next unless @sitesOnGene > 1;
 
+	my $strand = $sitesOnGene[0]->{'strand'};
+	foreach my $s (@sitesOnGene)
+	{
+		if ($s->{'strand'} ne $strand)
+		{
+			print "inconsistency of strand for sites in $geneId\n";
+			$strand = ".";
+			last;
+		}
+	}
+
+	next unless $strand eq '+' || $strand eq '-';
+	@sitesOnGene = reverse (@sitesOnGene) if $strand eq '-';	
+	
+	my $iter = 0;
+	foreach my $s (@sitesOnGene)
+	{
+		#next unless $s->{'score'} / $siteHash{$geneId}->{'N'} >= $minRatio;
+		
+		#$s->{'name'} .= "//" . $geneId;
+		
+		$s->{'name'} = $geneId . "[A$iter]";
+		$iter++;
+ 
 		print $fout bedToLine ($s), "\n";
 	}
 }
 
 close ($fout);
-
-
-
 

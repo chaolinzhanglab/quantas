@@ -1,6 +1,8 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 use strict;
+use warnings;
+
 use Getopt::Long;
 use File::Basename;
 
@@ -10,14 +12,18 @@ use Quantas;
 
 my $prog = basename ($0);
 my $verbose = 0;
+my $pseudoCount = 1;
 my $log2 = 0;
 my $count = 0;
 
 my $base = "";
+my $suffix = "";
 #my $method = "mean";  #sum
 
 GetOptions (
 	"base:s"=>\$base,
+	"suffix:s"=>\$suffix,
+	"pseudocount:f"=>\$pseudoCount,
 	"log2"=>\$log2,
 	"raw-count"=>\$count,
 	"v|verbose"=>\$verbose
@@ -28,6 +34,8 @@ if (@ARGV != 2)
 	print "generate expression matrix\n";
 	print "Usage $prog [options] <in.conf> <out.txt>\n";
 	print " -base         [string] : base dir of input data\n";
+	print " -suffix       [string] : add suffix to the file names\n";
+	print " -pseudocount  [float]  : pseudocount to be used ($pseudoCount)\n";
 	print " -log2                  : report log2 transformed RPKM\n";
 	print " --raw-count            : report the raw read count (will suppress -log2)\n";
 	print " -v                     : verbose\n";
@@ -38,7 +46,7 @@ my ($configFile, $outFile) = @ARGV;
 
 print "loading configuration file from $configFile ...\n" if $verbose;
 Carp::croak "contig file $configFile does not exist\n" unless -f $configFile;
-my $groups = readConfigFile ($configFile, $base);
+my $groups = readExprConfigFile ($configFile, $base, $suffix);
 
 print "done.\n" if $verbose;
 
@@ -60,8 +68,7 @@ foreach my $gName (@groupNames)
 		print "$iter: group=$gName, sample=$s\n" if $verbose;
 		my $inputFile = $s;
 		$inputFile = "$base/$inputFile" if $base ne '';
-		
-		my $sdata = readExprDataFile ($inputFile);
+		my $sdata = readExprDataFile ($inputFile, $pseudoCount);
 		$geneInfo = $sdata->{"geneInfo"};
 		if ($n != 0)
 		{
@@ -108,7 +115,8 @@ my $fout;
 
 open ($fout, ">$outFile") || Carp::croak "cannot open file $outFile to write\n";
 
-print $fout join ("\t", "#gene_id", "gene_symbol", "exon_len", @groupNames), "\n";
+#print $fout join ("\t", "#gene_id", "gene_symbol", @groupNames), "\n";
+print $fout join ("\t", "gene_id", "NAME", @groupNames), "\n";
 
 for (my $i = 0; $i < $n; $i++)
 {
@@ -126,11 +134,19 @@ for (my $i = 0; $i < $n; $i++)
 		}
 		else
 		{
-			$out[$g] = $log2 ? log ($d->[1]/$k) / log(2) : $d->[1]/$k;
+			if ($log2 && $d->[1] == 0)
+			{
+				$out[$g] = "NA";
+			}
+			else
+			{
+				$out[$g] = $log2 ? log ($d->[1]/$k) / log(2) : $d->[1]/$k;
+			}
 		}
 	}
 
-	print $fout join ("\t", @{$geneInfo->[$i]}, @out), "\n";
+	#print $fout join ("\t", @{$geneInfo->[$i]}, @out), "\n";
+	print $fout join ("\t", $geneInfo->[$i][0], $geneInfo->[$i][1], @out), "\n";
 }
 
 

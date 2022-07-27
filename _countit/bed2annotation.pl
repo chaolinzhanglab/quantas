@@ -1,7 +1,8 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 
 use strict;
+use warnings;
 use Getopt::Long;
 
 use Carp;
@@ -76,7 +77,9 @@ if (@ARGV != 2)
 	exit (1);
 }
 
-print "CMD = $prog ", join (' ', @ARGV0), "\n" if $verbose;
+my ($inBedFile, $outFile) = @ARGV;
+my $msgio = $outFile eq '-' ? *STDERR :  *STDOUT;
+print $msgio "CMD = $prog ", join (' ', @ARGV0), "\n" if $verbose;
 
 system ("mkdir $cache");
 
@@ -96,15 +99,23 @@ $analyses{'region'} = 1 if $get_region;
 $analyses{'custom'} = 1 if $get_custom ne '';
 
 
+if ($confFile ne '')
+{
+	Carp::croak "$confFile does not exist\n" unless -f $confFile;
+}
+else
+{
+	#take the default, assuming it is located in the same directory as the script
+	$confFile = "$cmdDir/ctk.loc";
+}
+
+
 my $customBedFile = $get_custom;
 
 if ($customBedFile ne '')
 {
 	Carp::croak "cannot file $customBedFile" unless -f $customBedFile;
 }
-
-
-my ($inBedFile, $outFile) = @ARGV;
 
 
 #save the original id
@@ -115,7 +126,10 @@ my $lineNoFile = "$cache/in.lineNo";
 
 #NOTE: "cat: write error: Broken pipe" means that cat was attempting to write stdout to the stdin of another process but the other process terminated. This will happen for every one of the cat <some file> | head -<n> commands when there are more than <n> lines in <some file>. The crude solution would be to discard the error messages
 
-my $cmd = "cat $inBedFile | grep -v \"^track\" 2>/dev/null | head -n 1 | awk '{print NF}' > $lineNoFile";
+#my $cmd = "cat $inBedFile | grep -v \"^track\" 2>/dev/null | head -n 1 | awk '{print NF}' > $lineNoFile";
+
+my $cmd = "cat $inBedFile 2>/dev/null | grep -v \"^track\" 2>/dev/null | head -n 1 | awk '{print NF}' > $lineNoFile";
+
 system ($cmd);
 
 my $colNum = `cat $lineNoFile`;
@@ -143,7 +157,7 @@ system ($cmd);
 
 #no header now
 $inBedFile = $inBedFileTmp;
-my $totalN = `wc -l $inBedFile | cut -d \" \" -f 1`; chomp $totalN;
+my $totalN = `wc -l $inBedFile | awk '{print \$1}'`; chomp $totalN;
 
 my $fout_summary;
 open ($fout_summary, ">$summaryFile") if $summaryFile ne '';
@@ -156,6 +170,14 @@ foreach my $analysis (sort keys %analyses)
 {
 	print "get $analysis annotation ...\n" if $verbose;
 	my $locationInfo = $analysis eq 'custom' ? {custom=>$customBedFile} : getLocationInfo ($confFile, $dbkey, $analysis);
+
+	if (keys %$locationInfo == 0)
+	{
+		my $msg = "cannot locate $analysis annotation bed file";
+		$msg .= " for $dbkey" if $dbkey ne '';
+
+		Carp::croak $msg, "\n";
+	}
 
 	#Carp:croak Dumper ($locationInfo), "\n";
 	my $tmpOutFile = "$cache/$analysis.out";
@@ -176,14 +198,14 @@ foreach my $analysis (sort keys %analyses)
 
 		#gene_id gene_symbol
 		my $cmd = "perl $cmdDir/bed2gene2symbol.pl --no-region-id $bigFlag $ssFlag $verboseFlag $inBedFile $transcriptBedFile $transcript2geneFile $gene2symbolFile $tmpOutFile";
-		print "$cmd\n" if $verbose;
+		print $msgio "$cmd\n" if $verbose;
 
 		my $ret = system ($cmd);
 		Carp::croak "$cmd failed: $?\n" if $ret != 0;
 
 		if (-f $summaryFile)
 		{
-			my $geneN = `awk '{if(NF>1) {print \$0}}' $tmpOutFile | wc -l`; chomp $geneN;
+			my $geneN = `awk '{if(NF>1) {print \$0}}' $tmpOutFile | wc -l | awk '{print \$1}'`; chomp $geneN;
 			#Carp::croak"geneN = $geneN\n";
 
 			print $fout_summary join("\t", "Region", "No.", "%"), "\n";
@@ -199,7 +221,7 @@ foreach my $analysis (sort keys %analyses)
 		bed2annot ($inBedFile, $rmskBedFile, $tmpOutFile, "max_overlap", $analysis, $cache, $ssFlag, $bigFlag, $verboseFlag, $keepCacheFlag);
 		if (-f $summaryFile)
 		{
-			my $rmskN = `awk '{if(NF>1) {print \$0}}' $tmpOutFile | wc -l`; chomp $rmskN;
+			my $rmskN = `awk '{if(NF>1) {print \$0}}' $tmpOutFile | wc -l | awk '{print \$1}'`; chomp $rmskN;
 			print $fout_summary join("\t", "Region", "No.", "%"), "\n";
 			print $fout_summary join ("\t", "Intervals overlapping repeat masked region", $rmskN, sprintf ("%.1f", $rmskN / $totalN * 100)), "\n";
 			print $fout_summary join ("\t", "Other", $totalN - $rmskN, sprintf ("%.1f", 100 - $rmskN / $totalN * 100)), "\n";
@@ -218,7 +240,7 @@ foreach my $analysis (sort keys %analyses)
 		if (-f $summaryFile)
 		{
 			my $featureName = $analysis eq 'custom' ? $customName : $analysis;
-			my $featureN = `awk '{if(NF>0) {print \$0}}' $tmpOutFile | wc -l`; chomp $featureN;
+			my $featureN = `awk '{if(NF>0) {print \$0}}' $tmpOutFile | wc -l | awk '{print \$1}'`; chomp $featureN;
 			print $fout_summary join("\t", "Region", "No.", "%"), "\n";
 			print $fout_summary join ("\t", "Intervals overlapping $featureName", $featureN, sprintf ("%.1f", $featureN / $totalN * 100)), "\n";
 			print $fout_summary join ("\t", "Other", $totalN - $featureN, sprintf ("%.1f", 100 - $featureN / $totalN * 100)), "\n";
@@ -363,17 +385,17 @@ foreach my $analysis (sort keys %analyses)
 		
 		if (-f $summaryFile)
 		{
-			#my $totalN = `wc -l $inBedFile | cut -d \" \" -f 1`; chomp $totalN;
-			my $genicN = `cat $bed_vs_genic_idFile $bed_vs_exon_idFile | sort | uniq | wc -l`; chomp $genicN;
+			#my $totalN = `wc -l $inBedFile | awk '{print \$1}'`; chomp $totalN;
+			my $genicN = `cat $bed_vs_genic_idFile $bed_vs_exon_idFile | sort | uniq | wc -l | awk '{print \$1}'`; chomp $genicN;
 			
-			my $exonicN = `wc -l $bed_vs_exon_idFile | cut -d \" \" -f 1`; chomp $exonicN;
-			my $exon_cdsN = `wc -l $bed_vs_exon_cds_idpairFile | cut -d \" \" -f 1`; chomp $exon_cdsN;
-			my $exon_5utrN = `wc -l $bed_vs_exon_5utr_idpairFile | cut -d \" \" -f 1`; chomp $exon_5utrN;
-			my $exon_3utrN = `wc -l $bed_vs_exon_3utr_idpairFile | cut -d \" \" -f 1`; chomp $exon_3utrN;
+			my $exonicN = `wc -l $bed_vs_exon_idFile | awk '{print \$1}'`; chomp $exonicN;
+			my $exon_cdsN = `wc -l $bed_vs_exon_cds_idpairFile | awk '{print \$1}'`; chomp $exon_cdsN;
+			my $exon_5utrN = `wc -l $bed_vs_exon_5utr_idpairFile | awk '{print \$1}'`; chomp $exon_5utrN;
+			my $exon_3utrN = `wc -l $bed_vs_exon_3utr_idpairFile | awk '{print \$1}'`; chomp $exon_3utrN;
 			my $intronicN = $genicN - $exonicN;
 			
-			my $upstream_intergenicN = `wc -l  $bed_vs_upstream_intergenic_idpairFile | cut -d \" \" -f 1`; chomp $upstream_intergenicN;
-			my $downstream_intergenicN = `wc -l $bed_vs_downstream_intergenic_idpairFile | cut -d \" \" -f 1`; chomp  $downstream_intergenicN;
+			my $upstream_intergenicN = `wc -l  $bed_vs_upstream_intergenic_idpairFile | awk '{print \$1}'`; chomp $upstream_intergenicN;
+			my $downstream_intergenicN = `wc -l $bed_vs_downstream_intergenic_idpairFile | awk '{print \$1}'`; chomp  $downstream_intergenicN;
 			
 			my $genic_extN = `cat  $bed_vs_genic_idFile $bed_vs_upstream_idFile $bed_vs_downstream_idFile | sort | uniq | wc -l`; chomp $genic_extN;
 			my $deep_intergenicN = $totalN - $genic_extN;
@@ -397,13 +419,14 @@ foreach my $analysis (sort keys %analyses)
 				print $fout_summary join ("\t", $g->[1], $g->[0], sprintf ("%.1f", $g->[0] / $totalN * 100)), "\n";
 			}
 	
+			#print "genicN=$genicN, genic_extN=$genic_extN\n";
 
 			my $extN = $genic_extN - $genicN;
-			$upstream_intergenicN = 0;
-			$upstream_intergenicN = int ($upstream_intergenicN / ($upstream_intergenicN+ $downstream_intergenicN) * $extN + 0.5) 
+			#$upstream_intergenicN = 0;
+			my $upstream_intergenicN_correct = int ($upstream_intergenicN / ($upstream_intergenicN+ $downstream_intergenicN) * $extN + 0.5) 
 			if $upstream_intergenicN+ $downstream_intergenicN > 0;
 			
-			$downstream_intergenicN = $extN - $upstream_intergenicN;
+			my $downstream_intergenicN_correct = $extN - $upstream_intergenicN_correct;
 
 
 			print $fout_summary "\nPercentage of intervals in each region (adjusted):\n";
@@ -411,9 +434,9 @@ foreach my $analysis (sort keys %analyses)
 			print $fout_summary join ("\t", "Region", "%"), "\n";
 			print $fout_summary join ("\t", "CDS exon", sprintf ("%.1f", $exon_cdsN * $exonicN / ($exon_5utrN + $exon_3utrN + $exon_cdsN) / $totalN * 100)), "\n";
 			print $fout_summary join ("\t", "5' UTR exon", sprintf ("%.1f", $exon_5utrN * $exonicN / ($exon_5utrN + $exon_3utrN + $exon_cdsN) / $totalN * 100)), "\n";
-			print $fout_summary join ("\t", "Upstream 10K", sprintf ("%.1f", $upstream_intergenicN / $totalN * 100)), "\n";
+			print $fout_summary join ("\t", "Upstream 10K", sprintf ("%.1f", $upstream_intergenicN_correct / $totalN * 100)), "\n";
 			print $fout_summary join ("\t", "3' UTR exon", sprintf ("%.1f", $exon_3utrN * $exonicN / ($exon_5utrN + $exon_3utrN + $exon_cdsN) / $totalN * 100)), "\n";
-			print $fout_summary join ("\t", "Downstream 10K", sprintf ("%.1f", $downstream_intergenicN / $totalN * 100)), "\n";
+			print $fout_summary join ("\t", "Downstream 10K", sprintf ("%.1f", $downstream_intergenicN_correct / $totalN * 100)), "\n";
 			print $fout_summary join ("\t", "Intron", sprintf ("%.1f", $intronicN /  $totalN * 100)), "\n";
 			print $fout_summary join ("\t", "Deep intergenic", sprintf ("%.1f", $deep_intergenicN /  $totalN * 100)), "\n";
 		}
@@ -480,10 +503,11 @@ foreach my $g (@fileInfo)
 system ("echo \"$headerLine\" > $outFile");
 $cmd .= ">> $outFile";
 
-print $cmd, "\n" if $verbose;
+print $msgio $cmd, "\n" if $verbose;
 system ($cmd);
 
 system ("rm -rf $cache") unless $keepCache;
+print $msgio "Done.\n" if $verbose;
 
 
 
@@ -504,6 +528,11 @@ sub getLocationInfo
 		next if $line =~/^\#/;
 
 		my ($db, $ana, $path, $type) = split (/\s+/, $line);
+
+		$path = "$cmdDir/$path" unless $path=~/^\//;
+		#if a relative path is provided, we assume the annotation file is located in the same folder as the script
+		#fixed by CZ, 07/31/2016
+
 		$type = $ana unless $type;
 
 		if ($db eq $dbkey && $ana eq $analysis)
@@ -525,14 +554,14 @@ sub bed2annot
 		my $bed_vs_annot_BedFile = "$cache/bed_vs_$name.bed";
 
 		my $cmd = "perl $cmdDir/tagoverlap.pl -d \"/##/\" $bigFlag $verboseFlag $keepCacheFlag -region $annotBedFile $inBedFile $bed_vs_annot_BedFile";
-		print $cmd,"\n" if $verbose;
+		print $msgio $cmd,"\n" if $verbose;
 
 		my $ret = system ($cmd);
 		Carp::croak "$cmd failed: $?\n" if $ret != 0;
 		my $bed_vs_annot_idpairFile = "$cache/bed_vs_$name.idpair";
 
 		$cmd = "cut -f 4,5 $bed_vs_annot_BedFile | awk -F \"/##/\" '{print \$1\"\\t\"\$2}' > $bed_vs_annot_idpairFile";
-		print $cmd, "\n" if $verbose;
+		print $msgio $cmd, "\n" if $verbose;
 		system ($cmd);
 
 		my $bed_vs_annot_idpairUniqFile = "$cache/bed_vs_$name.idpair.uniq";
@@ -542,7 +571,7 @@ sub bed2annot
 
 		#print annotation_id overlap_fraction
 		$cmd = "perl $cmdDir/selectRow.pl -f 3 -p -pt \"\" -s  $bed_vs_annot_idpairUniqFile $inBedFile | awk '{print \$2\"\\t\"\$3}' > $outFile";
-		print $cmd, "\n" if $verbose;
+		print $msgio $cmd, "\n" if $verbose;
 		$ret = system ($cmd);
 		Carp::croak "$cmd failed: $?\n" if $ret != 0;
 
@@ -554,24 +583,25 @@ sub bed2annot
 		my $bed_vs_annot_BedFile = "$cache/bed_vs_$name.bed";
 
 		my $cmd = "perl $cmdDir/tagoverlap.pl -d \"/##/\" $bigFlag $verboseFlag $ssFlag $keepCacheFlag --keep-score -region $inBedFile $annotBedFile $bed_vs_annot_BedFile";
-		print $cmd,"\n" if $verbose;
+		print $msgio $cmd,"\n" if $verbose;
 
 		my $ret = system ($cmd);
 		Carp::croak "$cmd failed: $?\n" if $ret != 0;
 		my $bed_vs_annot_idpairFile = "$cache/bed_vs_$name.idpair";
 																										#interval_id annot_id annot_score
 		$cmd = "cut -f 4,5 $bed_vs_annot_BedFile | awk -F \"/##/\" '{print \$1\"\\t\"\$2}' | awk '{print \$2\"\\t\"\$1\"\\t\"\$3}' > $bed_vs_annot_idpairFile";
-		print $cmd, "\n" if $verbose;
+		print $msgio $cmd, "\n" if $verbose;
 		system ($cmd);
 
 		my $bed_vs_annot_idpairUniqFile = "$cache/bed_vs_$name.idpair.uniq";
 		$cmd = "perl $cmdDir/uniqRow.pl $verboseFlag -value 2 -c $summaryMethod $bed_vs_annot_idpairFile $bed_vs_annot_idpairUniqFile";
+		print $msgio $cmd, "\n" if $verbose;
 		$ret = system ($cmd);
 		Carp::croak "$cmd failed: $?\n" if $ret != 0;
 
 		#print annotation_id score
-		$cmd = "perl $cmdDir/selectRow.pl -f 3 -p -pt \"\" -s  $bed_vs_annot_idpairFile $inBedFile | awk '{print \$2\"\\t\"\$3}' > $outFile";
-		print $cmd, "\n" if $verbose;
+		$cmd = "perl $cmdDir/selectRow.pl -f 3 -p -pt \"\" -s  $bed_vs_annot_idpairUniqFile $inBedFile | awk '{print \$2\"\\t\"\$3}' > $outFile";
+		print $msgio $cmd, "\n" if $verbose;
 		$ret = system ($cmd);
 		Carp::croak "$cmd failed: $?\n" if $ret != 0;
 
@@ -583,19 +613,19 @@ sub bed2annot
 		my $bed_vs_annot_BedFile = "$cache/bed_vs_$name.bed";
 
 		my $cmd = "perl $cmdDir/tagoverlap.pl -d \"/##/\" $bigFlag $verboseFlag $ssFlag $keepCacheFlag -region $annotBedFile $inBedFile $bed_vs_annot_BedFile";
-		print $cmd,"\n" if $verbose;
+		print $msgio $cmd,"\n" if $verbose;
 
 		my $ret = system ($cmd);
 		Carp::croak "$cmd failed: $?\n" if $ret != 0;
 		my $bed_vs_annot_idpairFile = "$cache/bed_vs_$name.idpair";
 	
 		$cmd = "cut -f 4 $bed_vs_annot_BedFile | awk -F \"/##/\" '{print \$1\"\\t\"\$2}' > $bed_vs_annot_idpairFile";
-		print $cmd, "\n" if $verbose;
+		print $msgio $cmd, "\n" if $verbose;
 		system ($cmd);
 
 		#print all names joined together
 		$cmd = "perl $cmdDir/selectRow.pl -f 3 -p -pt \"\" -s  $bed_vs_annot_idpairFile $inBedFile | awk '{print \$2}' > $outFile";
-		print $cmd, "\n" if $verbose;
+		print $msgio $cmd, "\n" if $verbose;
 		$ret = system ($cmd);
 		Carp::croak "$cmd failed: $?\n" if $ret != 0;
 

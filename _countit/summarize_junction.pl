@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 use strict;
 use warnings;
@@ -38,7 +38,7 @@ if (@ARGV != 3)
 	print "summarize the number of reads for each junction\n";
 	print "Usage: $prog [options] <intron.bed> <tag.bed> <intron.count.bed>\n";
 	print " <intron.bed> -- bed file of unique introns\n";
-	print " <tag.bed>    -- bed file of all tags, gz file allowed\n";
+	print " <tag.bed>    -- bed file of all tags, gz file allowed, use \"-\" for stdin\n";
 	print "OPTIONS:\n";
 	#print " -big           : the tag file is big\n";
 	print " -weight        : weight tags according to score\n";
@@ -53,7 +53,7 @@ if (@ARGV != 3)
 
 my ($intronBedFile, $tagBedFile, $outBedFile) = @ARGV;
 	
-my $bigFlag = $big ? '-big' : '';
+my $bigFlag = $big ? '-big' : ''; #TODO
 my $verboseFlag = $verbose ? '-v' : '';
 my $ssFlag = $separateStrand ? '--ss' : '';
 $weight = 1 if $mean;
@@ -90,16 +90,25 @@ print "counting junction reads ...\n" if $verbose;
 my $fin;
 open ($fin, "<$tagBedFile") || Carp::croak "cannot open file $tagBedFile to read\n"; 
 
-if ($tagBedFile =~/\.gz$/)
+if ($tagBedFile eq '-')
 {
-	open ($fin, "gunzip -c $tagBedFile | ")||Carp::croak "cannot open file $tagBedFile to read\n";
+   $fin = *STDIN;
 }
 else
 {
-	open ($fin, "<$tagBedFile") || Carp::croak "cannot open file $tagBedFile to read\n";
+	if ($tagBedFile =~/\.gz$/)
+	{
+		open ($fin, "gunzip -c $tagBedFile | ")||Carp::croak "cannot open file $tagBedFile to read\n";
+	}
+	elsif ($tagBedFile =~/\.bz2$/)
+    {
+        open ($fin, "bunzip2 -c $tagBedFile | ")||Carp::croak "cannot open file $tagBedFile to read\n";
+    }
+	else
+	{
+		open ($fin, "<$tagBedFile") || Carp::croak "cannot open file $tagBedFile to read\n";
+	}
 }
-
-
 
 $iter = 0;
 while (my $line = <$fin>)
@@ -131,7 +140,8 @@ while (my $line = <$fin>)
 	}
 }
 
-close ($fin);
+close ($fin) unless $tagBedFile eq '-';
+
 
 print "dumping output ...\n" if $verbose;
 

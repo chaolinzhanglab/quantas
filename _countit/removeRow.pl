@@ -1,6 +1,8 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 #
 use strict;
+use warnings;
+
 use Getopt::Long;
 use File::Basename;
 use Carp;
@@ -38,7 +40,6 @@ if (@ARGV != 2)
 }
 
 my ($inputFile, $filterFile) = @ARGV;
-
 print STDERR "reading $filterFile ...\n" if $verbose;
 
 my $fin;
@@ -50,7 +51,8 @@ my $i = 0;
 while ($line = <$fin>)
 {
 	chomp $line;
-	
+	next if $line =~/^\s*$/;
+
 #	if ($line =~/^(.*?)\t/)
 #	{
 #		$line = $1;

@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 use strict;
 use warnings;
@@ -63,6 +63,7 @@ if ($asType ne 'altt' && $asType ne 'alts' && $asType ne 'apat') #alt start or a
 {
 	my $cmd = "grep -v \"^track\" $tagBedFile | awk '{if(NF==12 && \$10>1) {print \$0}}' > $tagJunctionBedFile";
 	$cmd = "gunzip -c $tagBedFile | grep -v \"^track\" | awk '{if(NF==12 && \$10>1) {print \$0}}' > $tagJunctionBedFile" if $tagBedFile =~/\.gz$/;
+	$cmd = "bunzip2 -c $tagBedFile | grep -v \"^track\" | awk '{if(NF==12 && \$10>1) {print \$0}}' > $tagJunctionBedFile" if $tagBedFile =~/\.bz2$/;
 
 	my $ret = system ($cmd);
 	print "CMD $cmd failed: $?\n" if $ret != 0;

@@ -1,6 +1,8 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 use strict;
+use warnings;
+
 use Getopt::Long;
 use File::Basename;
 
@@ -14,6 +16,7 @@ my $verbose = 0;
 
 my $type = 'cass';
 my $base = "";
+my $suffix = "";
 
 my $minCoverage = 10;
 my $maxStd = 0.1;
@@ -21,14 +24,17 @@ my $naString = "";
 my $average = 0;
 
 my $id2gene2symbolFile = "";
+my $printInfo = 0;
 
 GetOptions ("t|type:s"=>\$type,
 	"base:s"=>\$base,
+	"suffix:s"=>\$suffix,
 	"avg"=>\$average,
 	"min-cov:i"=>\$minCoverage,
 	"max-std:f"=>\$maxStd,
 	"na-string:s"=>\$naString,
 	"id2gene2symbol:s"=>\$id2gene2symbolFile,
+	"print-info"=>\$printInfo,
 	"v|verbose"=>\$verbose
 );
 
@@ -38,12 +44,14 @@ if (@ARGV != 2)
 	print "Usage $prog [options] <in.conf> <out.txt>\n";
 	print " <in.conf> [string]: the first column is the dir or file name, and the second column is the group name\n";
 	print " -base         [string] : base dir of input data\n";
-	print " -type         [string] : AS type ([cass]|taca|alt5|alt3|mutx|iret|apa|snv|snv2ss)\n";
+	print " -type         [string] : AS type ([cass]|taca|alt5|alt3|mutx|iret|apa|snv|snv2ss|ss)\n";
+	print " -suffix       [string] : suffix of output file to be appended to group name (default=none)\n";
 	print " --avg                  : use average instead of sum\n";
 	print " --min-cov     [int]    : min coverage ($minCoverage)\n";
 	print " --max-std     [float]  : max standard deviation ($maxStd)\n";
 	print " --na-string   [string] : na string (default:empty)\n";
 	print " --id2gene2symbol [file]: mapping file of id to gene to symbol\n";
+	print " --print-info           : print AS information columns\n";
 	print " -v                     : verbose\n";
 	exit (1);
 }
@@ -57,7 +65,7 @@ if ($base ne '')
 
 print "loading configuration file from $configFile ...\n" if $verbose;
 Carp::croak "contig file $configFile does not exist\n" unless -f $configFile;
-my $groups = readConfigFile ($configFile, $base, $type);
+my $groups = readConfigFile ($configFile, $base, $type, $suffix);
 
 print "done.\n" if $verbose;
 
@@ -90,18 +98,22 @@ print "$n mapping entries loaded\n" if $verbose;
 
 
 
-print "loading data of individual samples ...\n" if $verbose;
+print "loading and aggregating data of individual samples ...\n" if $verbose;
 
-my %sampleData;
+#my %sampleData;
 my $ASInfo;
 my $nAS = 0;
 my $iter = 0;
 
 my @groupNames = sort {$groups->{$a}->{"id"} <=> $groups->{$b}->{"id"}} keys %$groups;
+my @groupData;
 
-foreach my $gName (@groupNames)
+for (my $g = 0; $g < @groupNames; $g++)
 {
+	my $gName = $groupNames[$g];
 	my $samples = $groups->{$gName}->{"samples"};
+	my $nsamples = @$samples;
+
 	foreach my $s (@$samples)
 	{
 		print "$iter: group=$gName, sample=$s\n" if $verbose;
@@ -121,7 +133,19 @@ foreach my $gName (@groupNames)
 		{
 			$nAS = @$ASInfo;
 		}
-		$sampleData{$s} = $sdata->{"data"};
+		#$sampleData{$s} = $sdata->{"data"};
+	
+		my $data = $sdata->{'data'};
+		for (my $i = 0; $i < $nAS; $i++)
+        {
+            my $d = $data->[$i];
+            for (my $j = 0; $j < @$d; $j++)
+            {
+                $groupData[$g][$i][$j] += $d->[$j];
+                $groupData[$g][$i][$j] /= $nsamples if $average;
+            }
+        }			
+
 		$iter++;
 	}
 }
@@ -129,48 +153,28 @@ foreach my $gName (@groupNames)
 print "$iter samples, $nAS events loaded.\n" if $verbose;
 
 
-print "aggregating samples in the same group ...\n" if $verbose;
-
-
-my @groupData;
-
-for (my $g = 0; $g < @groupNames; $g++)
-{
-	my $gName = $groupNames[$g];
-	my $samples = $groups->{$gName}->{"samples"};
-
-	foreach my $s (@$samples)
-	{
-		print "sample=$s\n" if $verbose;
-		my $data = $sampleData{$s};
-		for (my $i = 0; $i < $nAS; $i++)
-		{
-			my $d = $data->[$i];
-
-			my $nsamples = @$d;
-			for (my $j = 0; $j < @$d; $j++)
-            {
-                $groupData[$g][$i][$j] += $d->[$j];
-				$groupData[$g][$i][$j] /= $nsamples if $average;
-            }
-		}
-	}
-}
-
 
 my $fout;
 
 open ($fout, ">$outFile") || Carp::croak "cannot open file $outFile to write\n";
 
-if (-f $id2gene2symbolFile)
+my $header = "";
+if ($printInfo)
 {
-	print $fout join ("\t", "#event_id", "NAME", @groupNames), "\n";
+	$header = join ("\t", "#chrom", "chromStart", "chromEnd", "event_id", "score", "strand", "type", "isoforms");
 }
 else
 {
-	print $fout join ("\t", "#event_id", @groupNames), "\n";
+	$header = "#event_id";
 }
 
+if (-f $id2gene2symbolFile)
+{
+	$header .= "\tNAME";
+}
+
+
+print $fout join ("\t", $header, @groupNames), "\n";
 
 for (my $i = 0; $i < $nAS; $i++)
 {
@@ -209,7 +213,7 @@ for (my $i = 0; $i < $nAS; $i++)
 			
 			$ex = $d->[4] * ($nAltExon+1);
 		}
-		elsif ($type eq 'apa' || 'snv' || 'snv2ss')
+		elsif ($type eq 'apa' || $type eq 'snv' || $type eq 'snv2ss' || $type eq 'ss')
 		{
 			$in = $d->[0]; #site 1
 			$ex = $d->[1]; #site 2
@@ -243,11 +247,25 @@ for (my $i = 0; $i < $nAS; $i++)
 
 	if (-f $id2gene2symbolFile)
 	{
-		print $fout join ("\t", $ASInfo->[$i][3], $gene2symbol, @out), "\n";
+		if ($printInfo)
+		{
+			print $fout join ("\t", @{$ASInfo->[$i]}, $gene2symbol, @out), "\n";
+		}
+		else
+		{
+			print $fout join ("\t", $ASInfo->[$i][3], $gene2symbol, @out), "\n";
+		}
 	}
 	else
 	{
-		print $fout join ("\t", $ASInfo->[$i][3], @out), "\n";
+		if ($printInfo)
+		{
+			print $fout join ("\t", @{$ASInfo->[$i]}, @out), "\n";
+		}
+		else
+		{
+			print $fout join ("\t", $ASInfo->[$i][3], @out), "\n";
+		}
 	}
 }
 

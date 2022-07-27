@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 use strict;
 use warnings;
@@ -12,25 +12,30 @@ use Bio::SeqIO;
 
 use MyConfig;
 use Bed;
+use Sequence;
 use Common;
 
 my $prog = basename($0);
 
 my $bigFile = 0;	#if yes, we need to use cache
+my $minBlockSize = 2000000;
+
 my $separateStrand = 0;
 my $weight = 0;	#the way to calculate the score for each junction, without weight means the number of tags, other wise, the sum of scores
 my $genomeDir = "";
-my $organism = "mm9";
+my $organism = "mm10";
 my $verbose = 0;
 my $canonical = 0; #GT/AG, GC/AG, AT/AC
 my $GTAG = 0;
 my $anchor = 0;	#min size of the terminal block
+
 
 my $cache = getDefaultCache ($prog);
 
 
 GetOptions (
 			'big'=>\$bigFile,
+			'minBlockSize:i'=>\$minBlockSize,
 			'weight'=>\$weight,
 			'ss'=>\$separateStrand,
 			'can'=>\$canonical,
@@ -49,6 +54,7 @@ if (@ARGV != 2)
 	print "Usage: $prog [options] <in.bed> <out.bed>\n";
 	print " <in.bed>         : use - for stdin\n";
 	print " -big             : set when the input file is big\n";
+	print " -minBlockSize  [int]: minimim number of lines to read in each block for a big file ($minBlockSize)\n";
 	print " -ss              : separate strand\n";
 	print " -weight          : consider the weight of each tag\n";
 	print " -can             : canonical splice sites only (GT/AG, GC/AG, AT/AC)\n";
@@ -82,16 +88,18 @@ else
 
 my ($inBedFile, $outBedFile) = @ARGV;
 
+my $msgio = $outBedFile eq '-' ? *STDERR :  *STDOUT;
+
 Carp::croak "$cache already exists\n" if -d $cache;
 system ("mkdir $cache");
 
 
 my %tagCount;
 
-print "reading tags from $inBedFile ...\n" if $verbose;
+print $msgio "reading tags from $inBedFile ...\n" if $verbose;
 if ($bigFile)
 {
-	my $ret = splitBedFileByChrom ($inBedFile, $cache, $verbose);
+	my $ret = splitBedFileByChrom ($inBedFile, $cache, v=>$verbose, "sort"=>1);
 	%tagCount = %$ret;
 }
 else
@@ -104,7 +112,7 @@ else
 	}
 }
 
-print "get tag count broken down into chromosomes ...\n" if $verbose;
+print $msgio "get tag count broken down into chromosomes ...\n" if $verbose;
 
 foreach my $chrom (sort keys %tagCount)
 {
@@ -115,7 +123,7 @@ foreach my $chrom (sort keys %tagCount)
 }
 
 
-print "\n\nclustering tags ...\n" if $verbose;
+print $msgio "\n\nclustering tags ...\n" if $verbose;
 
 
 my @strands = qw(+ -);
@@ -134,30 +142,80 @@ else
 foreach my $chrom (sort keys %tagCount)
 {
 	#load tags
-	my $tags;
+	my $chromSeqStr = "";
+	
+	if ($canonical)
+	{
+		my $chromFastaFile = "$genomeDir/$chrom.fa";
+
+		print "loading sequences of $chrom from $chromFastaFile...\n" if $verbose;
+		#my $seqIO = Bio::SeqIO->new (-file=>$chromFastaFile, format=>'Fasta');
+		#$chromSeqStr = $seqIO->next_seq()->seq();
+		#Bioperl somehow report an error here, so we read the genome fasta file using the code below (cz: 04/15/2019)
+
+		my $fin;
+		open ($fin, "<$chromFastaFile") || Carp::croak "cannot open file $chromFastaFile to read\n";
+		while (my $line = <$fin>)
+		{
+			chomp $line;
+			next if $line =~/^\>/;
+			next if $line =~/^\s*$/;
+			$chromSeqStr .= $line;
+		}
+		close ($fin);
+	}
+
+
 	if ($bigFile)
 	{
 		my $tmpFile = $tagCount{$chrom}->{'f'};
-		print "loading tags on chromsome $chrom from $tmpFile...\n" if $verbose;
-		$tags = readBedFile ($tmpFile, $verbose);
+		print $msgio "loading tags on chromsome $chrom from $tmpFile...\n" if $verbose;
+		my $fin;
+		open ($fin, "<$tmpFile") || Carp::croak "cannot open file $tmpFile to read\n";
+
+        my $iter = 0;
+		my $junctionIdx = 0;
+        while (my $tags = readNextBedBlock ($fin, 1, 0, minBlockSize=> $minBlockSize))
+        {
+			print $msgio "processing block $iter ...\n" if $verbose;
+            $iter++;
+			$junctionIdx = tag2junctions ($tags, $junctionIdx, \$chromSeqStr, $fout);
+		}
+     	close ($fin);
 	}
 	else
 	{
-		$tags = $tagCount{$chrom};
+		my $tags = $tagCount{$chrom};
+		my $n = @$tags;
+
+		print $msgio "$n tags loaded on chromosome $chrom\n" if $verbose;
+		tag2junctions ($tags, 0, \$chromSeqStr, $fout);
 	}
+}
+close ($fout) if $outBedFile ne '-';
+
+system ("rm -rf $cache");
+
+
+
+sub tag2junctions
+{
+	my ($tags, $junctionIdx, $chromSeqStrRef, $fout) = @_;
 
 	my $n = @$tags;
-	print "$n tags loaded on chromosome $chrom\n" if $verbose;
+	my $chrom = $tags->[0]->{'chrom'}; #assume all tags are on the same chromosome
+	my $chromSeqStr = $$chromSeqStrRef;
+
 	Carp::croak "No block information\n" unless exists $tags->[0]->{'blockStarts'};
 
 	
 	#identify introns
-	print "clustering $chrom ...\n" if $verbose;
+	print "clustering tags ...\n" if $verbose;
 	my %introns;
 	foreach my $t (@$tags)
 	{
 		my $strand = $t->{'strand'};
-		my $chrom = $t->{'chrom'};
+		#my $chrom = $t->{'chrom'};
 		for (my $i = 0; $i < $t->{'blockCount'} -1; $i++)
 		{
 			my $upstreamExonStart = $t->{'chromStart'} + $t->{'blockStarts'}->[$i];
@@ -194,21 +252,11 @@ foreach my $chrom (sort keys %tagCount)
 	}
 
 	$n = keys %introns;
-	print "$n introns identified on chrom $chrom\n" if $verbose;
-
+	print "$n introns identified\n" if $verbose;
 
 	#output
-	my $chromSeqStr = "";
-	
-	if ($canonical)
-	{
-		print "loading sequences of $chrom ...\n" if $verbose;
-		my $chromFastaFile = "$genomeDir/$chrom.fa";
-		my $seqIO = Bio::SeqIO->new (-file=>$chromFastaFile, format=>'Fasta');
-		$chromSeqStr = $seqIO->next_seq()->seq();
-	}
 
-	my $iter = 0;
+	my $iter = $junctionIdx;
 	foreach my $key (sort keys %introns)
 	{
 		my $i = $introns{$key};
@@ -265,11 +313,9 @@ foreach my $chrom (sort keys %tagCount)
 			join(",", $intronStart - $chromStart, $chromEnd - $intronEnd),
 			join(",", 0, $intronEnd + 1 - $chromStart)), "\n";
 	}
-	print "$iter introns passed filtering on chrom $chrom\n" if $verbose;
+	print $msgio "$iter introns passed filtering\n" if $verbose;
+	return $iter;
 }
-close ($fout) if $outBedFile ne '-';
-
-system ("rm -rf $cache");
 
 
 

@@ -1,8 +1,8 @@
-#!/usr/bin/perl -w
-
+#!/usr/bin/env perl
 
 use strict;
 use warnings;
+
 use Data::Dumper;
 use Getopt::Long;
 use File::Basename;

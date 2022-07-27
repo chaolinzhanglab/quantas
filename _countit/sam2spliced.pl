@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 use strict;
 use warnings;
@@ -83,6 +83,10 @@ else
 	{
 		open ($fin, "gunzip -c $inSamFile | ") || Carp::croak "cannot open file $inSamFile to read\n";
 	}
+	elsif ($inSamFile =~/\.bz2$/)
+    {
+        open ($fin, "bunzip2 -c $inSamFile | ") || Carp::croak "cannot open file $inSamFile to read\n";
+    }
 	elsif ($inSamFile =~/\.bam$/)
 	{
 		open ($fin, "samtools view $inSamFile | ") || Carp::croak "cannot open file $inSamFile to read\n";

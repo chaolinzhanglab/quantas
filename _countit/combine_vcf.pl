@@ -1,7 +1,7 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 use strict;
-
+use warnings;
 
 use Getopt::Long;
 use Carp;
@@ -17,6 +17,7 @@ my $minAltBase = 0;
 my $minDepth = 0;
 my $minMaf = 0;
 my $fixAltBase = 0;
+my $outFile = "";
 
 my $verbose = 0;
 
@@ -26,6 +27,7 @@ GetOptions (
 	"a:i"=>\$minAltBase,
 	"r:f"=>\$minMaf,
 	"x"=>\$fixAltBase,
+	"o:s"=>\$outFile,
 	"v"=>\$verbose);
 
 if (@ARGV < 1 && $vcfListFile eq '')
@@ -39,9 +41,13 @@ if (@ARGV < 1 && $vcfListFile eq '')
 	print " -a [int]   : minimum alt base to report a potential SNV ($minAltBase)\n";
 	print " -r [float] : minimum minor allele frequency ($minMaf)\n";
 	print " -x         : do not reassign altBase\n";
+	print " -o [string]: output file (default=STDOUT)\n";
 	print " -v         : verbose\n";
 	exit (1);
 }
+
+
+my $msgio = $outFile eq '' ? *STDERR :  *STDOUT;
 
 my @vcfFiles = @ARGV;
 
@@ -60,7 +66,7 @@ if (-f $vcfListFile)
 }
 
 my $n = @vcfFiles;
-print STDERR "$n vcf files to be processed\n" if $verbose;
+print $msgio "$n vcf files to be processed\n" if $verbose;
 
 
 my %snvHash;
@@ -69,7 +75,7 @@ my %snvHash;
 my $iter = 0;
 foreach my $vcfFile (@vcfFiles)
 {
-	print STDERR "$iter of $n: $vcfFile ...\n" if $verbose;
+	print $msgio "$iter of $n: $vcfFile ...\n" if $verbose;
 	$iter++;
 
 	my $fin;
@@ -83,21 +89,25 @@ foreach my $vcfFile (@vcfFiles)
 		next if $line =~/^\s*$/;
 		next if $line =~/^\#/;
 		
-		print STDERR "$i ...\n" if $verbose && $i % 10000 == 0;
+		print STDERR "$i ...\n" if $verbose && $i % 100000 == 0;
 		$i++;
 
 		my $snv = lineToVcf ($line);
 		my $chrom = $snv->{'chrom'};
 		my $position = $snv->{'position'};
 		my $dp4 = $snv->{'info'}->{'DP4'};
+		
 		my ($refPos, $refNeg, $altPos, $altNeg) = split (/\,/, $dp4);
 		my $refBase = $snv->{'refBase'};
 		my $altBase = $snv->{'altBase'};
 	
+		my $bc = $altPos + $altNeg > 0 ? 1 : 0;
+		$bc = $snv->{'info'}{'BC'} if exists $snv->{'info'}{'BC'};
+
 		if (exists $snvHash{$chrom} && $snvHash{$chrom}->{$position})
 		{
 			my $existingSnv = $snvHash{$chrom}->{$position};
-			$existingSnv->{'info'}->{'BC'} += ($altPos + $altNeg > 0 ? 1 : 0);
+			$existingSnv->{'info'}->{'BC'} += $bc;
 			$existingSnv->{'+'}->{$refBase} += $refPos;
 			$existingSnv->{'-'}->{$refBase} += $refNeg;
 			$existingSnv->{'+'}->{$altBase} += $altPos;
@@ -112,7 +122,7 @@ foreach my $vcfFile (@vcfFiles)
 			$snv->{'-'}->{$refBase} += $refNeg;
 			$snv->{'+'}->{$altBase} += $altPos;
 			$snv->{'-'}->{$altBase} += $altNeg;
-			$snv->{'info'}->{'BC'} = $altPos + $altNeg > 0 ? 1 : 0;
+			$snv->{'info'}->{'BC'} = $bc;
 			$snvHash{$chrom}->{$position} = $snv;
 		}
 	}
@@ -120,19 +130,29 @@ foreach my $vcfFile (@vcfFiles)
 
 srand (1); #used by assignAltBase
 
-print join ("\t", "#CHROM", "POS ID", "REF", "ALT", "QUAL", "FILTER", "INFO"), "\n";
+my $fout;
+if ($outFile ne '')
+{
+	open ($fout, ">$outFile") || Carp::croak "can not open file $outFile to write\n";
+}
+else
+{
+     $fout = *STDOUT;
+}
+
+print $fout join ("\t", "#CHROM", "POS ID", "REF", "ALT", "QUAL", "FILTER", "INFO"), "\n";
 
 foreach my $chrom (sort keys %snvHash)
 {			
 	my $snvChrom = $snvHash{$chrom};
 	my $n = keys %$snvChrom;
 
-	print STDERR "$chrom ($n snvs)...\n" if $verbose;
+	print $msgio "$chrom ($n snvs)...\n" if $verbose;
 	
 	my $iter = 0;
 	foreach my $pos (sort {$a <=>$b} keys %$snvChrom)
 	{
-		print STDERR "$iter ...\n" if $verbose && $iter % 10000 == 0;
+		print $msgio "$iter ...\n" if $verbose && $iter % 10000 == 0;
 		$iter++;
 
 		my $snv = $snvChrom->{$pos};
@@ -146,21 +166,24 @@ foreach my $chrom (sort keys %snvHash)
 		my $refBase = $snv->{'refBase'};
     	my $altBase = $fixAltBase ? $snv->{'altBase'} : assignAltBase (\%readBaseHash, $refBase);
 		
+		#Carp::croak Dumper ($snv), "\n";
 		my $altBaseSum = $readBaseHash{$altBase};
 		my $total = $readBaseHash{$refBase} + $altBaseSum;
 
 		my $maf = $total >0 ? $altBaseSum / $total : 0;
 		$maf = 1 - $maf if $maf > 0.5;
 		
-		next unless $altBaseSum >= $minAltBase && $total >= $minDepth && $maf > $minMaf;
+		next unless $altBaseSum >= $minAltBase && $total >= $minDepth && $maf >= $minMaf;
 		
 		my $DP4 = join(",", $snv->{'+'}->{$refBase}, $snv->{'-'}->{$refBase}, $snv->{'+'}->{$altBase}, $snv->{'-'}->{$altBase});
 		
 		#note pos is zero-based coordinates
 		$snv->{'altBase'} = $altBase;
 		$snv->{'info'}->{'DP4'} = $DP4;
-		print vcfToLine ($snv), "\n";
+		print $fout vcfToLine ($snv), "\n";
 	}
 }
+
+close ($fout) if $outFile ne '';
 
 

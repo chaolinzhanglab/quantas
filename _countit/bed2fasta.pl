@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 #
 
 use strict;
@@ -35,8 +35,14 @@ my $keepCache = 0;
 my $singleLine = 0;
 my $chrLen = {};
 my $chrLenFile = "";
+my $noTruncateAtEnd = 0;
 my $capital = 0;
 my $mutate = 0;
+
+my $idPrefix = "";
+my $idSuffix = "";
+
+
 my $verbose = 0;
 
 my $outBedFile = "";
@@ -54,11 +60,14 @@ GetOptions (
 			'gd:s'=>\$genomeDir,
 			'twoBitFile:s'=>\$twoBitFile,
 			'chrLen:s'=>\$chrLenFile,
+			'no-truncate-at-end'=>\$noTruncateAtEnd,
 			'nibFrag:s'=>\$nibFrag,
 			'twoBitToFa:s'=>\$twoBitToFa,
 			'mutate'=>\$mutate,
 			'capital'=>\$capital,
 			's|single-line'=>\$singleLine,
+			'id-prefix:s'=>\$idPrefix,
+			'id-suffix:s'=>\$idSuffix,
 #			'm|mask_repeat'=>\$maskRepeats,
 #			'rm:s'=>\$RepeatMasker,
 			'v|verbose'=>\$verbose
@@ -76,6 +85,8 @@ if (@ARGV != 2)
 	#print " -m          : mask repeats <on|[off]> (obsolete feature)\n";
 	print " -s          : print each sequence in a single line\n";
 	print " -capital    : print capital letters\n";
+	print " --id-prefix [string]: add prefix to each sequence id\n";
+	print " --id-suffix [string]: add suffix to each sequence id\n";
 	print " -ob: output bed file name, effective only with -n\n";
 	print " -v : verbose\n";
 	print "External programs and dir\n";
@@ -88,6 +99,7 @@ if (@ARGV != 2)
 	print " -gd         [string]: directory of nib files [$genomeDir] (will override -org)\n";
 	print " -twoBitFile [string]: twoBitFile [$twoBitFile] (will override -org or -gd)\n";
 	print " -chrLen     [string]: chromosome length file\n";
+	print " --no-truncate-at-end: skip truncated region at chromosome ends (when chrLen file specified)\n";
 	print "\n";
 	exit (1);
 }
@@ -332,12 +344,17 @@ for (my $i = 0; $i < @$regions; $i++)
 			$header .= ":$neighbor" if ($neighbor ne '');	#to generate unique names
 		}
 	}
+
+	$header = $idPrefix . $header if $idPrefix ne '';
+	$header .= $idSuffix if $idSuffix ne '';
+
 	my $id = $header;
 	my $name = $header;
 	
 	if ($upt || $dnt)
 	{
 		print "$name reach the end of the chromosome\n" if $verbose;
+		next if -f $chrLenFile && $noTruncateAtEnd;
 	}
 
 	my $desc = "/strand=$strand";

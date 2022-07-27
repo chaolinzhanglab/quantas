@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 use strict;
 use warnings;
@@ -35,6 +35,7 @@ my $big = 0;
 my $printSingleton = 0;
 my $usePreCalScore = 0;
 
+my $sizeDistOnly = 0;
 my $sizeDistFile = "";
 my $keepCache = 0;
 
@@ -51,6 +52,7 @@ GetOptions (
 	"use-pre-calc-size-dist:s"=>\$sizeDistFile,
 	#"ss"=>\$separateStrand,
 	"library-type:s"=>\$libraryType,
+	"size-dist-only"=>\$sizeDistOnly,
 	"print-singleton"=>\$printSingleton,
 	"o|outp-dir:s"=>\$outputDir,
 	"keep-cache"=>\$keepCache,
@@ -77,6 +79,7 @@ if (@ARGV != 1 && @ARGV != 2)
 	print " -big                             : read number in each split is big (i.e. over ~3M pairs)\n";
 	print " --library-type           [string]: library  type ([unstranded]|stranded-as|stranded-sa)\n";
 	#print " --ss                             : separate the two strands\n";
+	print " --size-dist-only                 : only estimate fragment size distribution\n";
 	print " --print-singleton                : print reads even when they are not found to be a legitimate pair\n";
 	print " -o                       [dir]   : output dir (default=$outputDir)\n"; 
 	print " --keep-cache                     : keep cache files when the job is done\n";
@@ -214,67 +217,6 @@ if ($cleanIsoform)
 	$isoformBedFile = $cleanNrIsoformBedFile;
 }
 
-my $scoredIsoformBedFile = "$tmpDir/isoform.scored.bed";
-if ($usePreCalScore)
-{
-	print "using pre-calculated isoform score ...\n" if $verbose;
-	$scoredIsoformBedFile = $isoformBedFile;
-}
-else
-{
-	print "scoring isoforms using observed junction reads ...\n" if $verbose;
-	print "loading isoforms from $isoformBedFile ...\n" if $verbose;
-
-	my $isoforms = readBedFile ($isoformBedFile, $verbose);
-
-	#initialization
-	map {$_->{'score'} = 0} @$isoforms;
-
-	for (my $s = 0; $s < $nsplit; $s++)
-	{
-		print "processing split $s of $nsplit ...\n";
-		print "retrieving junction reads ...\n" if $verbose;
-
-		my $junctionRead1BedFile = "$tmpDir/read1.junction.bed";
-		my $junctionRead2BedFile = "$tmpDir/read2.junction.bed";
-
-		my $cmd = "awk '{if(\$10>1) {print \$0}}' $splitRead1BedStem.$s > $junctionRead1BedFile";
-		print $cmd, "\n" if $verbose;
-		my $ret = system ($cmd);
-		Carp::croak "Command [$cmd] crashed:$?\n" unless $ret == 0;
-
-		$cmd =    "awk '{if(\$10>1) {print \$0}}' $splitRead2BedStem.$s > $junctionRead2BedFile";
-		print $cmd, "\n" if $verbose;
-		$ret = system ($cmd);
-		Carp::croak "Command [$cmd] crashed:$?\n" unless $ret == 0;
-
-		my $junctionReadBedFile = "$tmpDir/read.junction.bed";
-		$cmd = "cat $junctionRead1BedFile $junctionRead2BedFile > $junctionReadBedFile";
-		$ret = system ($cmd);
-		Carp::croak "Command [$cmd] crashed:$?\n" unless $ret == 0;
-
-		#library type not considered now, to be fixed
-		$cmd = "perl $cmdDir/score_exon_trio.pl $verboseFlag $bigFlag -c $tmpDir/score_junction_tmp_files $isoformBedFile $junctionReadBedFile $scoredIsoformBedFile";
-		print $cmd, "\n" if $verbose;
-		$ret = system ($cmd);
-		Carp::croak "Command [$cmd] crashed:$?\n" unless $ret == 0;
-		
-		system ("rm -rf $tmpDir/score_junction_tmp_files");
-
-		print "reading scored isoforms using split $s ...\n" if $verbose;
-		my $splitScoredIsoforms = readBedFile ($scoredIsoformBedFile, $verbose);
-		for (my $i = 0; $i < @$isoforms; $i++)
-	   	{
-			$isoforms->[$i]->{'score'} += $splitScoredIsoforms->[$i]->{'score'};
-		}
-		unlink $junctionRead1BedFile, $junctionRead2BedFile, $junctionReadBedFile;
-	}
-	print "writing scored isoforms to $scoredIsoformBedFile ...\n" if $verbose;
-
-	writeBedFile ($isoforms, $scoredIsoformBedFile);
-}
-
-
 #get size distribution
 if (-f $sizeDistFile)
 {
@@ -362,6 +304,75 @@ else
 	close ($fout);
 }
 
+if ($sizeDistOnly)
+{
+	system ("rm -rf $tmpDir") unless $keepCache;
+	print `date` if $verbose;
+	exit (0);
+}
+
+my $scoredIsoformBedFile = "$tmpDir/isoform.scored.bed";
+if ($usePreCalScore)
+{
+	print "using pre-calculated isoform score ...\n" if $verbose;
+	$scoredIsoformBedFile = $isoformBedFile;
+}
+else
+{
+	print "scoring isoforms using observed junction reads ...\n" if $verbose;
+	print "loading isoforms from $isoformBedFile ...\n" if $verbose;
+
+	my $isoforms = readBedFile ($isoformBedFile, $verbose);
+
+	#initialization
+	map {$_->{'score'} = 0} @$isoforms;
+
+	for (my $s = 0; $s < $nsplit; $s++)
+	{
+		print "processing split $s of $nsplit ...\n";
+		print "retrieving junction reads ...\n" if $verbose;
+
+		my $junctionRead1BedFile = "$tmpDir/read1.junction.bed";
+		my $junctionRead2BedFile = "$tmpDir/read2.junction.bed";
+
+		my $cmd = "awk '{if(\$10>1) {print \$0}}' $splitRead1BedStem.$s > $junctionRead1BedFile";
+		print $cmd, "\n" if $verbose;
+		my $ret = system ($cmd);
+		Carp::croak "Command [$cmd] crashed:$?\n" unless $ret == 0;
+
+		$cmd =    "awk '{if(\$10>1) {print \$0}}' $splitRead2BedStem.$s > $junctionRead2BedFile";
+		print $cmd, "\n" if $verbose;
+		$ret = system ($cmd);
+		Carp::croak "Command [$cmd] crashed:$?\n" unless $ret == 0;
+
+		my $junctionReadBedFile = "$tmpDir/read.junction.bed";
+		$cmd = "cat $junctionRead1BedFile $junctionRead2BedFile > $junctionReadBedFile";
+		$ret = system ($cmd);
+		Carp::croak "Command [$cmd] crashed:$?\n" unless $ret == 0;
+
+		#library type not considered now, to be fixed
+		$cmd = "perl $cmdDir/score_exon_trio.pl $verboseFlag $bigFlag -c $tmpDir/score_junction_tmp_files $isoformBedFile $junctionReadBedFile $scoredIsoformBedFile";
+		print $cmd, "\n" if $verbose;
+		$ret = system ($cmd);
+		Carp::croak "Command [$cmd] crashed:$?\n" unless $ret == 0;
+		
+		system ("rm -rf $tmpDir/score_junction_tmp_files");
+
+		print "reading scored isoforms using split $s ...\n" if $verbose;
+		my $splitScoredIsoforms = readBedFile ($scoredIsoformBedFile, $verbose);
+		for (my $i = 0; $i < @$isoforms; $i++)
+	   	{
+			$isoforms->[$i]->{'score'} += $splitScoredIsoforms->[$i]->{'score'};
+		}
+		unlink $junctionRead1BedFile, $junctionRead2BedFile, $junctionReadBedFile;
+	}
+	print "writing scored isoforms to $scoredIsoformBedFile ...\n" if $verbose;
+
+	writeBedFile ($isoforms, $scoredIsoformBedFile);
+}
+
+
+
 print "inferring structures of PE reads ...\n" if $verbose;
 
 my $pairBedFile = "$outputDir/pair.gapless.bed";
@@ -382,8 +393,6 @@ for (my $s = 0; $s < $nsplit; $s++)
 }
 
 system ("rm -rf $tmpDir") unless $keepCache;
-
-
 print `date` if $verbose;
 
 
@@ -411,6 +420,10 @@ sub prepareSamFiles
 	{
 		open ($fin1, "gunzip -c $read1SamFile |") || Carp::croak "cannot open file $read1SamFile to read\n";
 	}
+	elsif ($read1SamFile =~/\.bz2$/)
+    {
+        open ($fin1, "bunzip2 -c $read1SamFile |") || Carp::croak "cannot open file $read1SamFile to read\n";
+    }
 	else
 	{
 		open ($fin1, $read1SamFile) || Carp::croak "cannot open file $read1SamFile to read\n";
@@ -422,6 +435,10 @@ sub prepareSamFiles
 		{
 			open ($fin2, "gunzip -c $read2SamFile |") || Carp::croak "cannot open file $read2SamFile to read\n";
 		}
+		elsif ($read2SamFile =~/\.bz2$/)
+        {
+            open ($fin2, "bunzip2 -c $read2SamFile |") || Carp::croak "cannot open file $read2SamFile to read\n";
+        }
 		else
 		{
 			open ($fin2, $read2SamFile) || Carp::croak "cannot open file $read2SamFile to read\n";
@@ -553,6 +570,7 @@ sub prepareBedFiles
 		#read1 and read2 are provided in separate files
 		my $cmd = "grep -v \"^track\" $read1BedFile | awk '{print \$4\"\\tr1\\t\"\$0}' | sort -T $cache -k 1b,1 > $sortedRead1BedFile";
 		$cmd = "gunzip -c $read1BedFile | grep -v \"^track\" | awk '{print \$4\"\\tr1\\t\"\$0}' | sort -T $cache -k 1b,1 > $sortedRead1BedFile" if $read1BedFile=~/\.gz$/;
+		$cmd = "bunzip2 -c $read1BedFile | grep -v \"^track\" | awk '{print \$4\"\\tr1\\t\"\$0}' | sort -T $cache -k 1b,1 > $sortedRead1BedFile" if $read1BedFile=~/\.bz2$/;
 
 		print $cmd, "\n" if $verbose;
 		my $ret = system ($cmd);
@@ -560,6 +578,7 @@ sub prepareBedFiles
 
 		$cmd =    "grep -v \"^track\" $read2BedFile | awk '{print \$4\"\\tr2\\t\"\$0}' | sort -T $cache -k 1b,1 > $sortedRead2BedFile";
 		$cmd = "gunzip -c $read2BedFile | grep -v \"^track\" | awk '{print \$4\"\\tr2\\t\"\$0}' | sort -T $cache -k 1b,1 > $sortedRead2BedFile" if $read2BedFile=~/\.gz$/;		
+		$cmd = "bunzip2 -c $read2BedFile | grep -v \"^track\" | awk '{print \$4\"\\tr2\\t\"\$0}' | sort -T $cache -k 1b,1 > $sortedRead2BedFile" if $read2BedFile=~/\.bz2$/;
 
 		print $cmd, "\n" if $verbose;
 		$ret = system ($cmd);
@@ -572,6 +591,9 @@ sub prepareBedFiles
 		$cmd = "gunzip -c $read1BedFile | grep -v \"^track\" | grep -P \"\\/1\\t\" | sed 's/\\/1\\t/\\t/g' | awk '{print \$4\"\\tr1\\t\"\$0}'| sort -T $cache -k 1b,1 > $sortedRead1BedFile"
 		if $read1BedFile=~/\.gz$/;
 		
+		$cmd = "bunzip2 -c $read1BedFile | grep -v \"^track\" | grep -P \"\\/1\\t\" | sed 's/\\/1\\t/\\t/g' | awk '{print \$4\"\\tr1\\t\"\$0}'| sort -T $cache -k 1b,1 > $sortedRead1BedFile"
+		if $read1BedFile=~/\.bz2$/;
+	
 		print $cmd, "\n" if $verbose;
 		my $ret = system ($cmd);
 		Carp::croak "CMD=$cmd failed: $?\n" if $ret != 0;
@@ -579,6 +601,9 @@ sub prepareBedFiles
 		$cmd =    "grep -v \"^track\" $read1BedFile | grep -P \"\\/2\\t\" | sed 's/\\/2\\t/\\t/g' | awk '{print \$4\"\\tr2\\t\"\$0}'| sort -T $cache -k 1b,1 > $sortedRead2BedFile";
 		$cmd = "gunzip -c $read1BedFile | grep -v \"^track\" | grep -P \"\\/2\\t\" | sed 's/\\/2\\t/\\t/g' | awk '{print \$4\"\\tr2\\t\"\$0}'| sort -T $cache -k 1b,1 > $sortedRead2BedFile"
 		if $read1BedFile=~/\.gz$/;
+
+		$cmd = "bunzip2 -c $read1BedFile | grep -v \"^track\" | grep -P \"\\/2\\t\" | sed 's/\\/2\\t/\\t/g' | awk '{print \$4\"\\tr2\\t\"\$0}'| sort -T $cache -k 1b,1 > $sortedRead2BedFile"
+		if $read1BedFile=~/\.bz2$/;
 
 		print $cmd, "\n" if $verbose;
 		$ret = system ($cmd);

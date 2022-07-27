@@ -1,6 +1,8 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 use strict;
+use warnings;
+
 use Carp;
 use File::Basename;
 use Getopt::Long;
@@ -20,11 +22,13 @@ my $progDir = dirname ($0);
 my $knownSiteFile = "";
 my $keepGeneInfo = 0;
 my $keepScore = 0;
-my $countStrand = "";
 
+my $countStrand = "";
+my $separateStrand = "";
 
 GetOptions (
 	"l:s"=>\$knownSiteFile,
+	"s"=>\$separateStrand,
 	"count-strand:s"=>\$countStrand,
 	"keep-score"=>\$keepScore,
 	"keep-gene"=>\$keepGeneInfo,
@@ -36,7 +40,8 @@ if (@ARGV != 2)
 	print "Usage: $prog [options] <in.vcf> <out.txt>\n";
 	print " <in.vcf>                : use - for STDIN\n";
 	print " -l      [string]        : a vcf file with list of known sites (optionally with strand info) to summarize\n";
-	print " --count-strand [string] : only count reads on the specified strand ([+]|-)\n";
+	print " -s                      : separate strand\n";
+	#print " --count-strand [string] : only count reads on the specified strand ([+]|-)\n";
 	print " --keep-score            : keep score in snv\n";
 	print " --keep-gene             : keep gene information\n";
 	print " -v                      : verbose\n";
@@ -49,7 +54,8 @@ my ($inVcfFile, $outFile) = @ARGV;
 
 if ($countStrand ne '')
 {
-	Carp::croak "incorrect parameter for --count-strand: $countStrand\n" unless $countStrand eq '+' || $countStrand eq '-';
+	Carp::croak "obsolete parameters: --count-strand\n";
+	#Carp::croak "incorrect parameter for --count-strand: $countStrand\n" unless $countStrand eq '+' || $countStrand eq '-';
 }
 
 my %knownSiteHash;
@@ -64,7 +70,7 @@ if ($knownSiteFile ne '')
 	foreach my $s (@$snvs)
 	{
 		my $chromPos = $s->{"chrom"} . ":" . $s->{'position'};
-		$s->{'info'}{'strand'} = $countStrand if $countStrand ne ''; #override the strand to count
+		#$s->{'info'}{'strand'} = $countStrand if $countStrand ne ''; #override the strand to count
 
 		$knownSiteHash{$chromPos} = $s;
 		$s->{'iter'} = $i++;
@@ -98,7 +104,7 @@ while (my $line =<$fin>)
 	chomp $line;
 	next if $line =~/^\#/;
 
-	print "$iter ...\n" if $verbose && $iter % 10000 == 0;
+	print "$iter ...\n" if $verbose && $iter % 100000 == 0;
 	$iter++;
 	my $snv = lineToVcf ($line);
 
@@ -126,6 +132,7 @@ while (my $line =<$fin>)
 	{
 		#all sites and get the strand information there
 		Carp::croak "no strand information found:", Dumper ($snv), "\n" unless exists $snv->{'info'}{'strand'};
+		
 		$strand = $snv->{'info'}{'strand'};
 		$gene = $snv->{'info'}->{'gene'} if exists $snv->{'info'}->{'gene'};
 		$region = $snv->{'info'}->{'region'} if exists $snv->{'info'}->{'region'};
@@ -148,8 +155,8 @@ while (my $line =<$fin>)
 		($refAntisense, $refSense, $altAntisense, $altSense) = ($refSense, $refAntisense, $altSense, $altAntisense);
 	}
 	
-	my $refSum = $countStrand ne '' ? $refSense : $refSense+$refAntisense;
-	my $altSum = $countStrand ne '' ? $altSense : $altSense+$altAntisense;
+	my $refSum = $separateStrand ? $refSense : $refSense+$refAntisense;
+	my $altSum = $separateStrand ? $altSense : $altSense+$altAntisense;
 	#note strand has already been flipped above
 
 	my $total = $refSum + $altSum;

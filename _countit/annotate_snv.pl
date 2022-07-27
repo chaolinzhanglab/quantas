@@ -1,6 +1,8 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 use strict;
+use warnings;
+
 use Carp;
 use File::Basename;
 use Getopt::Long;
@@ -50,6 +52,7 @@ if (@ARGV != 1)
 {
 	print "annotate gene information\n";
 	print "Usage: $prog [options] <in.vcf>\n";
+	print " in.vcf: .gz file accepted\n";
 	print " -annot [string] : configuration of gene annotation files\n";
 	print " -dbkey [string] : dbkey ($dbkey)\n";
 	print " -snp   [string] : BED file with coordinates of known snps\n";
@@ -111,7 +114,13 @@ Carp::croak "cannot create $cache\n" unless $ret == 0;
 my $snvStrandBedFile = "$cache/snv.strand.bed";
 
 #pos strand
-my $cmd = "grep -P -v \"^\#\" $inVcfFile | awk '{print \$1\"\\t\"\$2-1\"\\t\"\$2\"\\t\"\$1\":\"\$2-1\".+\\t0\\t+\"}' > $snvStrandBedFile";
+#my $cmd = "grep -P -v \"^\#\" $inVcfFile | awk '{print \$1\"\\t\"\$2-1\"\\t\"\$2\"\\t\"\$1\":\"\$2-1\".+\\t0\\t+\"}' > $snvStrandBedFile";
+my $cmd = "grep -v \"^\#\" $inVcfFile | awk '{print \$1\"\\t\"\$2-1\"\\t\"\$2\"\\t\"\$1\":\"\$2-1\".+\\t0\\t+\"}' > $snvStrandBedFile";
+if ($inVcfFile =~/\.gz$/)
+{
+	$cmd = "zcat $inVcfFile | grep -v \"^\#\" | awk '{print \$1\"\\t\"\$2-1\"\\t\"\$2\"\\t\"\$1\":\"\$2-1\".+\\t0\\t+\"}' > $snvStrandBedFile";
+}
+
 print STDERR "$cmd\n" if $verbose;
 
 $ret = system ($cmd);
@@ -120,7 +129,13 @@ Carp::croak "CMD=$cmd failed: $?\n" unless $ret == 0;
 
 
 #neg strand
-$cmd = "grep -P -v \"^\#\" $inVcfFile | awk '{print \$1\"\\t\"\$2-1\"\\t\"\$2\"\\t\"\$1\":\"\$2-1\".-\\t0\\t-\"}' >> $snvStrandBedFile";
+#$cmd = "grep -P -v \"^\#\" $inVcfFile | awk '{print \$1\"\\t\"\$2-1\"\\t\"\$2\"\\t\"\$1\":\"\$2-1\".-\\t0\\t-\"}' >> $snvStrandBedFile";
+$cmd = "grep -v \"^\#\" $inVcfFile | awk '{print \$1\"\\t\"\$2-1\"\\t\"\$2\"\\t\"\$1\":\"\$2-1\".-\\t0\\t-\"}' >> $snvStrandBedFile";
+if ($inVcfFile =~/\.gz$/)
+{
+	$cmd = "zcat $inVcfFile | grep -v \"^\#\" | awk '{print \$1\"\\t\"\$2-1\"\\t\"\$2\"\\t\"\$1\":\"\$2-1\".-\\t0\\t-\"}' >> $snvStrandBedFile";
+}
+
 print STDERR "$cmd\n" if $verbose;
 $ret = system ($cmd);
 Carp::croak "CMD=$cmd failed: $?\n" unless $ret == 0;
@@ -168,7 +183,12 @@ if (-f $knownSNPBedFile)
 	#
 	print STDERR "annotating known snps ...\n" if $verbose;
 	my $snvBedFile = "$cache/snv.nostrand.bed";
-	$cmd = "grep -P -v \"^\#\" $inVcfFile | awk '{print \$1\"\\t\"\$2-1\"\\t\"\$2\"\\t\"\$1\":\"\$2-1}' > $snvBedFile";
+	#$cmd = "grep -P -v \"^\#\" $inVcfFile | awk '{print \$1\"\\t\"\$2-1\"\\t\"\$2\"\\t\"\$1\":\"\$2-1}' > $snvBedFile";
+	$cmd = "grep -v \"^\#\" $inVcfFile | awk '{print \$1\"\\t\"\$2-1\"\\t\"\$2\"\\t\"\$1\":\"\$2-1}' > $snvBedFile";
+	if ($inVcfFile =~/\.gz$/)
+	{
+		$cmd = "zcat $inVcfFile | grep -v \"^\#\" | awk '{print \$1\"\\t\"\$2-1\"\\t\"\$2\"\\t\"\$1\":\"\$2-1}' > $snvBedFile";
+	}
 	print STDERR "$cmd\n" if $verbose;
 
 	$ret = system ($cmd);
@@ -202,7 +222,19 @@ if (-f $knownSNPBedFile)
 	close ($fin);
 }
 
-open ($fin, "<$inVcfFile") || Carp::croak "cannot open file $inVcfFile to read\n";
+if ($inVcfFile =~/\.gz$/)
+{
+	open ($fin, "gunzip -c $inVcfFile | ")||Carp::croak "cannot open file $inVcfFile to read\n";
+}
+elsif ($inVcfFile =~/\.bz2$/)
+{
+    open ($fin, "bunzip2 -c $inVcfFile | ")||Carp::croak "cannot open file $inVcfFile to read\n";
+}
+else
+{
+	open ($fin, "<$inVcfFile") || Carp::croak "cannot open file $inVcfFile to read\n";
+}
+
 
 $iter = 0;
 

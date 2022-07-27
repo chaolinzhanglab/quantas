@@ -1,7 +1,7 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 use strict;
-
+use warnings;
 
 use Getopt::Long;
 use Carp;
@@ -111,6 +111,7 @@ my $uniqFlag = $uniq ? "-q 1" : "";
 my %knownSiteHash;
 my $knownSitePosFile = "";
 $n = 0;
+my $msgio = *STDERR;
 
 if ($knownSiteFile ne '')
 {
@@ -125,14 +126,15 @@ if ($knownSiteFile ne '')
 	if ($big)
 	{
 		print STDERR "split known sites from $knownSiteFile ...\n" if $verbose;
-		my $ret = splitVcfFileByChrom ($knownSiteFile, $cache, $verbose);
+
+		my $ret = splitVcfFileByChrom ($knownSiteFile, $cache, $verbose, $msgio);
 		%knownSiteHash = %$ret;
 	}
 	else
 	{
 		print STDERR "loading known sites from $knownSiteFile ...\n" if $verbose;
 
-		my $sites = readVcfFile ($knownSiteFile, $verbose);
+		my $sites = readVcfFile ($knownSiteFile, $verbose, $msgio);
 		foreach my $snv (@$sites)
 		{
 			my $chrom = $snv->{'chrom'};
@@ -191,24 +193,24 @@ while (my $line = <$fin>)
 {
 	chomp $line;
 	next if $line =~/^\s*$/;
-	
+
 	print STDERR "$iter ...\n" if $verbose && $iter % 1000000 == 0;
 	$iter++;
 
 	my ($chrom, $pos, $refBase, $count, $readBaseStr, $qualStr, $readPosStr) = split (/\t/, $line);
 	$grandTotalRead++ if $readBaseStr =~/\^/;
-	
+
 
 	if ((-f $knownSiteFile) && $chrom ne $prevChrom)
 	{
 		#file handles for tmp site output
 		close ($fout) if $prevChrom ne '';
-	
+
 		$prevChrom = $chrom;
 		$knownSiteOnChrom = {};
-		
+
 		my $f = "$cache/$chrom.new.vcf";
-		open ($fout, ">$f") || Carp::croak "cannot open $f to write\n"; 
+		open ($fout, ">$f") || Carp::croak "cannot open $f to write\n";
 
 		#load data for the current chrom
 		my $sites = [];
@@ -218,7 +220,7 @@ while (my $line = <$fin>)
 			if (-f $f)
 			{
 				print STDERR "load known sites on $chrom...\n" if $verbose;
-				$sites = readVcfFile ($f, $verbose);
+				$sites = readVcfFile ($f, $verbose, $msgio);
 				my $n = @$sites;
 				print STDERR "$n sites loaded\n" if $verbose;
 
@@ -231,7 +233,7 @@ while (my $line = <$fin>)
 				$sites = $knownSiteHash{$chrom};
 			}
 		}
-		
+
 		#sort sites into hash tables, and discard sites with ambiguous refBase
 		foreach my $snv (@$sites)
 		{
@@ -242,7 +244,7 @@ while (my $line = <$fin>)
 				print STDERR "non [ACGT] in refBase, will skip:", Dumper ($snv), "\n";
 				next;
 			}
-		
+
 			my $position = $snv->{'position'}; #zero-based
 			$knownSiteOnChrom->{$position} = $snv;
 		}
@@ -260,9 +262,9 @@ while (my $line = <$fin>)
 
 	#$readBaseStr=~s/\^\S|\$//g; #remove start mark and mapping score and end mark of a read
 	#$readBaseStr=~s/[\^\S|\$]//g; #remove start mark and mapping score and end mark of a read
-	
+
 	#Carp::croak "readBaseStr=$readBaseStr\n";
-	
+
 	if (not (-f $knownSiteFile))
     {
 		next unless $readBaseStr =~/[ACGTacgt]/;
@@ -271,12 +273,12 @@ while (my $line = <$fin>)
 	}
 
 	my $readBase = splitReadBaseStr($readBaseStr);
-	
+
 	my @qual = split (//, $qualStr);
 	my @readPos = split (/\,/, $readPosStr);
 
 	Carp::croak "incorrect parsing of readBase: from=$readBaseStr, to=", join("|", @$readBase), "\n"
-	if @$readBase != $count;
+	if $count>0 && @$readBase != $count; # $count>0, to exclude condition where $count==0 while $readBase="*", updated by sb4045, Jun-16-2021
 
 	my %readBaseHash = (
 		'+'=>{A=>0, C=>0, G=>0, T=>0},
@@ -285,7 +287,7 @@ while (my $line = <$fin>)
 	for (my $i = 0; $i < $count; $i++)
 	{
 		next unless ord ($qual[$i]) - $offset >= $baseQ  && $readPos[$i] > $trimEnd && $readPos[$i] <= $readLen - $trimEnd;
-	
+
 		my $b = $readBase->[$i];
 		if ($b eq '.')
 		{
@@ -306,7 +308,7 @@ while (my $line = <$fin>)
 			$grandTotalNonRefBase++;
 		}
 	}
-	
+
 	$readBaseHash{'A'} = $readBaseHash{'+'}->{'A'} + $readBaseHash{'-'}->{'A'};
 	$readBaseHash{'C'} = $readBaseHash{'+'}->{'C'} + $readBaseHash{'-'}->{'C'};
 	$readBaseHash{'G'} = $readBaseHash{'+'}->{'G'} + $readBaseHash{'-'}->{'G'};
@@ -326,7 +328,7 @@ while (my $line = <$fin>)
 	$grandTotalAltBase += $altBaseSum;
 
 	my $depth = $readBaseHash{'+'}->{$refBase} + $readBaseHash{'-'}->{$refBase} + $readBaseHash{'+'}->{$altBase} + $readBaseHash{'-'}->{$altBase};
-	
+
 	if (not (-f $knownSiteFile))
 	{
 		next unless $readBaseHash{$altBase} > 0;
@@ -353,7 +355,7 @@ my $nonRefError = $grandTotalRead > 0 ? $grandTotalNonRefBase / $grandTotalRead 
 my $altError = $grandTotalRead > 0 ? $grandTotalAltBase / $grandTotalRead / ($readLen - $trimEnd * 2) : "NA";
 
 #if a list of known sites are provided, the error rate is not accurate, so we do not report
-print STDERR "total mapped reads = $grandTotalRead, total non-ref base = $grandTotalNonRefBase, non-ref per base=$nonRefError, total alt base = $grandTotalAltBase, alt per base=$altError\n" unless -f $knownSiteFile; 
+print STDERR "total mapped reads = $grandTotalRead, total non-ref base = $grandTotalNonRefBase, non-ref per base=$nonRefError, total alt base = $grandTotalAltBase, alt per base=$altError\n" unless -f $knownSiteFile;
 
 close ($fin);
 close ($fout) if $prevChrom ne '';
@@ -371,7 +373,7 @@ if (-f $knownSiteFile)
 		my $f = "$cache/$chrom.new.vcf";
 		if (-f $f)
 		{
-			my $sites = readVcfFile ($f, $verbose);
+			my $sites = readVcfFile ($f, $verbose, $msgio);
 			foreach my $snv (@$sites)
 			{
 				my $position = $snv->{'position'};
@@ -379,18 +381,18 @@ if (-f $knownSiteFile)
 				$newSiteHash{$position} = $snv;
 			}
 		}
-		
+
 		my $sites;
 		if ($big)
 		{
 			my $f = "$cache/$chrom.vcf";
-			$sites = readVcfFile ($f, $verbose);
+			$sites = readVcfFile ($f, $verbose, $msgio);
 		}
 		else
 		{
 			$sites = $knownSiteHash{$chrom};
 		}
-		
+
 		#output
 		foreach my $snv (@$sites)
 		{
@@ -402,7 +404,7 @@ if (-f $knownSiteFile)
 				print STDERR "non [ACGT] in refBase, will skip:", Dumper ($snv), "\n";
 				next;
 			}
-			
+
 			if (exists $newSiteHash{$position})
 			{
 				my $newSnv = $newSiteHash{$position};
@@ -431,7 +433,7 @@ sub splitReadBaseStr
 	#{
 	#	push @ret, $1;
 	#}
-	
+
 	my @chars = split (//, $str);
 	for (my $i = 0; $i < @chars; $i++)
 	{
@@ -457,16 +459,16 @@ sub splitReadBaseStr
 			#now the first base of indel sequence
 			my $startIdx = $i;
 			my $endIdx = $i + $len - 1;
-			
+
 			my $indelStr = join ("", @chars[$startIdx..$endIdx]);
 			#ignore indels for now
-			
+
 			#push @ret, join("", $type, $len, $indelStr);
-			
+
 			#jump to the last base of indel str
 			$i = $endIdx;
 		}
-		elsif ($c eq '$')	
+		elsif ($c eq '$')
 		{
 			#end of mapping, skip this char
 			next;
@@ -480,4 +482,3 @@ sub splitReadBaseStr
 	}
 	return \@ret;
 }
-

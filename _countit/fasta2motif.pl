@@ -1,6 +1,8 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 use strict;
+use warnings;
+
 use File::Basename;
 use Getopt::Long;
 use Bio::SeqIO;
@@ -17,10 +19,12 @@ my $threshold = 0;
 my $functionalDepth = 0;
 my $baseCompStr = "";
 my $motifType = "count";
+my $prior = 0.002;
 
 GetOptions ('s|single-strand'=>\$singleStrand,
 		'motif-type:s'=>\$motifType,
 		'c:s'=>\$baseCompStr,
+		'prior:f'=>\$prior,
 		't|threshold:f'=>\$threshold,
 		'func-depth'=>\$functionalDepth,
 		'v'=>\$verbose
@@ -32,8 +36,9 @@ if (@ARGV != 3)
 	print "search motif sites\n";
 	print "Usage: $prog [options] <input.fa> <motif.txt> <out.bed>\n";
 	print "OPTION:\n";
-	print " --motif-type [string]: ([count]|pwm)\n";
+	print " --motif-type [string]: ([count]|frequency|pwm)\n";
 	print " -c           [string]: background base composition (for count matrix)\n";
+	print " -prior       [float] : prior used to convert frequency matrix to PWM ($prior)\n";
 	print " -t           [float] : motif threshold ($threshold)\n";
 	print " --func-depth         : use functional depth rather than the PWM score\n";
 	print " -s                   : search only the given strand\n";
@@ -88,7 +93,19 @@ print "read motif file $motifFile ...\n" if $verbose;
 my $motif = readMotifFile ($motifFile);
 my $matrix = getMatrix($motif->[0]);
 
-$matrix = countToStormoMatrix ($matrix, $baseComp) if $motifType eq 'count';
+if ($motifType eq 'count')
+{
+	$matrix = countToStormoMatrix ($matrix, $baseComp);
+}
+elsif ($motifType eq 'frequency')
+{
+    $matrix = countToBayesianMatrix ($matrix, $baseComp, $prior);
+}
+elsif ($motifType ne 'pwm')
+{
+    Carp::croak "in correct motif type: $motifType\n";
+}
+
 
 print "search motif occurrence ...\n";
 

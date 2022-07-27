@@ -1,6 +1,8 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 use strict;
+use warnings;
+
 use Getopt::Long;
 use File::Basename;
 
@@ -101,6 +103,11 @@ if (-f $id2gene2symbolFile)
 
 	close ($fin);
 }
+elsif ($id2gene2symbolFile ne '')
+{
+	Carp::croak "$id2gene2symbolFile does not exist\n";
+}
+
 my $n = keys %id2gene2symbolHash;
 
 print "$n mapping entries loaded\n" if $verbose;

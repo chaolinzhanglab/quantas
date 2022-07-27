@@ -1,4 +1,9 @@
+#!/usr/bin/env perl
+
+
 use strict;
+use warnings;
+
 
 #TODO: parallelize the hypergeometric calculations
 
@@ -273,7 +278,7 @@ foreach my $sample (sort keys %sampleGenes)
 
 		# print "$a\t$b\t$c\t$d\t$hyper2\n";
 
-		$hyper2 = log($hyper2)/log(10) if ($log);
+		$hyper2 = -log($hyper2)/log(10) if ($log);
 
 		$results{$go}{$sample} = $hyper2;
 	}

@@ -1,6 +1,8 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 
 use strict;
+use warnings;
+
 use Carp;
 use File::Basename;
 use Getopt::Long;
@@ -81,7 +83,9 @@ while (my $line =<$fin>)
 	my $total = $pos + $neg;
 
 	my $strand = ".";
-	if ($total < $minDepth)
+	my $totalSense = $pos > $neg ? $pos : $neg;	
+
+	if ($totalSense < $minDepth)
 	{	
 		$strand = ".";
 	}

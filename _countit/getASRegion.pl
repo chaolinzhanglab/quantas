@@ -1,7 +1,8 @@
+#!/usr/bin/env perl
+
 #This program is to take the output of getExonIntron.pl to 
 #get the relevant regions for alternative 5'/3' splice sites
 
-#!/usr/bin/perl -w
 
 use strict;
 use warnings;

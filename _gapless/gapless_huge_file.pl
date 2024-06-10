@@ -95,7 +95,7 @@ if (@ARGV == 2)
 	Carp::croak "$read2InFile does not exists\n" unless -f $read2InFile;
 }
 
-Carp::croak "$outputDir already exists" if -d $outputDir;
+Carp::croak "$outputDir already exists\n" if -d $outputDir;
 
 if ($sizeDistFile ne '')
 {

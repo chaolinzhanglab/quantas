@@ -50,18 +50,21 @@ my $groups = readExprConfigFile ($configFile, $base, $suffix);
 
 print "done.\n" if $verbose;
 
-print "loading data of individual samples ...\n" if $verbose;
+print "loading data of individual samples and aggregating samples in the same group...\n" if $verbose;
 
-my %sampleData;
+#my %sampleData;
 my $geneId;
 my $n = 0;
 my $iter = 0;
 my $geneInfo;
 
 my @groupNames = sort {$groups->{$a}->{"id"} <=> $groups->{$b}->{"id"}} keys %$groups;
+my @groupData;
 
-foreach my $gName (@groupNames)
+for (my $g = 0; $g < @groupNames; $g++)
 {
+	my $gName = $groupNames[$g];
+
 	my $samples = $groups->{$gName}->{"samples"};
 	foreach my $s (@$samples)
 	{
@@ -78,28 +81,7 @@ foreach my $gName (@groupNames)
 		{
 			$n = @$geneInfo;
 		}
-		$sampleData{$s} = $sdata->{"data"};
-		$iter++;
-	}
-}
-
-print "$iter samples, $n genes loaded.\n" if $verbose;
-
-
-print "aggregating samples in the same group ...\n" if $verbose;
-
-
-my @groupData;
-
-for (my $g = 0; $g < @groupNames; $g++)
-{
-	my $gName = $groupNames[$g];
-	my $samples = $groups->{$gName}->{"samples"};
-
-	foreach my $s (@$samples)
-	{
-		print "sample=$s\n" if $verbose;
-		my $data = $sampleData{$s};
+		my $data = $sdata->{"data"};
 		for (my $i = 0; $i < $n; $i++)
 		{
 			my $d = $data->[$i];
@@ -107,9 +89,11 @@ for (my $g = 0; $g < @groupNames; $g++)
 			$groupData[$g][$i][0] += $d->[0]; #tagNum
 			$groupData[$g][$i][1] += $d->[1]; #RPKM
 		}
+		$iter++;
 	}
 }
 
+print "$iter samples, $n genes loaded.\n" if $verbose;
 
 my $fout;
 
